@@ -1,0 +1,48 @@
+// SPDX-License-Identifier: MIT
+pragma solidity =0.8.28;
+
+interface IOnChainSymmioVault {
+    struct WithdrawRequest {
+        address receiver;
+        address sender;
+        uint256 amount;
+        uint256 minAmountOut;
+        RequestStatus status;
+        uint256 acceptedRatio;
+        uint256 acceptedWithdawRequestTimestamp;
+    }
+
+    enum RequestStatus {
+        Pending,
+        Ready,
+        Done,
+        Canceled
+    }
+
+    event Deposit(address indexed depositor, uint256 amount);
+    event WithdrawRequestEvent(
+        uint256 indexed requestId,
+        address indexed sender,
+        address indexed receiver,
+        uint256 amount
+    );
+    event WithdrawRequestCanceled(uint256 indexed requestId);
+    event WithdrawRequestAcceptedEvent(
+        uint256 providedAmount,
+        uint256[] acceptedRequestIds,
+        uint256 paybackRatio
+    );
+    event WithdrawClaimedEvent(
+        uint256 indexed requestId,
+        address indexed receiver
+    );
+    event SymmioAddressUpdatedEvent(address indexed newSymmioAddress);
+    event DepositLimitUpdatedEvent(uint256 depositLimit, uint256 depositPerUserLimit);
+
+    event SolverUpdatedEvent(address indexed solver);
+    event DepositToSymmio(
+        address indexed depositor,
+        address indexed solver,
+        uint256 amount
+    );
+}
