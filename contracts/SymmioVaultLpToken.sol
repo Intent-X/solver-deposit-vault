@@ -12,13 +12,14 @@ contract SymmioVaultLpToken is
     AccessControlEnumerableUpgradeable
 {
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
+    uint8 internal _decimals;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
     }
 
-    function initialize() external initializer {
+    function initialize(uint8 decimals_) external initializer {
         __ERC20_init("OnChainSymmioLP", "smUSD");
         __ERC20Burnable_init();
         __AccessControl_init();
@@ -26,6 +27,7 @@ contract SymmioVaultLpToken is
 
         _grantRole(DEFAULT_ADMIN_ROLE, _msgSender());
         _pause();
+        _decimals = decimals_;
     }
 
     function pause() external onlyRole(DEFAULT_ADMIN_ROLE) {
@@ -34,6 +36,10 @@ contract SymmioVaultLpToken is
 
     function unpause() external onlyRole(DEFAULT_ADMIN_ROLE) {
         _unpause();
+    }
+
+    function decimals() public override view returns(uint8) {
+        return _decimals;
     }
 
     function mint(address to, uint256 amount) external onlyRole(MINTER_ROLE) {

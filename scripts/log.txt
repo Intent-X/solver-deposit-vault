@@ -1,0 +1,36 @@
+Deploying contracts with the account: 0xf1d63df1CD64a3f3A8F440bAba619dbB4baBB020
+{
+  proxy: '0xB6d340Af68279326402139C30934317929535D32',
+  admin: '0x4c15Bf47E901125FFe606204628081FC07c3dCbE',
+  implementation: '0xFA77517B5F3FEadf19C23Fb5DB0c71b91C13f7bf'
+}
+Verifying contract...
+Verifying implementation: 0xFA77517B5F3FEadf19C23Fb5DB0c71b91C13f7bf
+Successfully submitted source code for contract
+contracts/SymmioVaultLpToken.sol:SymmioVaultLpToken at 0xFA77517B5F3FEadf19C23Fb5DB0c71b91C13f7bf
+for verification on the block explorer. Waiting for verification result...
+
+Successfully verified contract SymmioVaultLpToken on the block explorer.
+https://basescan.org/address/0xFA77517B5F3FEadf19C23Fb5DB0c71b91C13f7bf#code
+
+Verifying proxy: 0xB6d340Af68279326402139C30934317929535D32
+Successfully verified contract TransparentUpgradeableProxy at 0xB6d340Af68279326402139C30934317929535D32.
+Linking proxy 0xB6d340Af68279326402139C30934317929535D32 with implementation
+Successfully linked proxy to implementation.
+Verifying proxy admin: 0x4c15Bf47E901125FFe606204628081FC07c3dCbE
+Failed to verify ProxyAdmin contract at 0x4c15Bf47E901125FFe606204628081FC07c3dCbE: Already Verified
+Error:
+Verification completed with the following errors.
+
+Error 1: Failed to verify ProxyAdmin contract at 0x4c15Bf47E901125FFe606204628081FC07c3dCbE: Already Verified
+
+Deploying contracts with the account: 0xf1d63df1CD64a3f3A8F440bAba619dbB4baBB020
+{
+  proxy: '0x7785fE35F6510D111063579AA14F7D28aD84512A',
+  admin: '0x00f3e7930B15c6D8dd4376E5054832bB6a273c9D',
+  implementation: '0xC4369Fbe8f4ADf8e4F93fCD1D0f68f67e0aac473'
+}
+Verifying contract...
+Successfully submitted source code for contract
+contracts/OnChainSymmioVault.sol:OnChainSymmioVault at 0xC4369Fbe8f4ADf8e4F93fCD1D0f68f67e0aac473
+for verification on the block explorer. Waiting for verification result...

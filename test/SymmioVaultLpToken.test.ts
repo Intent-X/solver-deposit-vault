@@ -11,7 +11,7 @@ describe("SymmioVaultLpToken", function () {
     [owner, alice, bob, carol] = await ethers.getSigners();
 
     const Factory = await ethers.getContractFactory("SymmioVaultLpToken");
-    token = await upgrades.deployProxy(Factory, [], { initializer: "initialize" });
+    token = await upgrades.deployProxy(Factory, [18], { initializer: "initialize" });
     await token.waitForDeployment();
   });
 
@@ -24,7 +24,7 @@ describe("SymmioVaultLpToken", function () {
     expect(await token.hasRole(DEFAULT_ADMIN_ROLE, owner.address)).to.equal(true);
     expect(await token.paused()).to.equal(true);
 
-    await expect(token.initialize()).to.be.reverted;
+    await expect(token.initialize(6)).to.be.reverted;
   });
 
   it("only admin can pause/unpause; second pause while paused reverts", async () => {
