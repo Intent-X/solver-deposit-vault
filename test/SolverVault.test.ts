@@ -129,6 +129,12 @@ describe("SymmioSolverDepositor", function () {
 			await expect(symmioDepositor.connect(other).setDepositLimit(1000, 1000)).to.be.reverted
 		})
 
+		it("Should update withdrawalPeriod", async () => {
+			expect(await symmioDepositor.withdrawalPeriod()).to.be.eq(604800)
+			await expect(symmioDepositor.connect(setter).setWithdrawalPeriod(60)).to.be.emit(symmioDepositor, "WithdrawalPeriodUpdate")
+			await expect(symmioDepositor.connect(other).setWithdrawalPeriod(60)).to.be.reverted
+			expect(await symmioDepositor.withdrawalPeriod()).to.be.eq(60)
+		})
 	})
 
 

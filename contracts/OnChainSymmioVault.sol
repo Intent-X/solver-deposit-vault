@@ -24,7 +24,6 @@ contract OnChainSymmioVault is
     bytes32 public constant SETTER_ROLE = keccak256("SETTER_ROLE");
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
     bytes32 public constant UNPAUSER_ROLE = keccak256("UNPAUSER_ROLE");
-    uint256 public constant WITHDRAWAL_PERIOD = 604800;
 
     ISymmio public symmio;
     address public solver;
@@ -37,6 +36,7 @@ contract OnChainSymmioVault is
     uint256 public currentDeposit;
     uint256 public collateralTokenDecimals;
     WithdrawRequest[] public withdrawRequests;
+    uint256 public withdrawalPeriod;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -67,6 +67,7 @@ contract OnChainSymmioVault is
         setDepositLimit(_depositLimit, _depositPerUserLimit);
         setSolver(_solver);
         minimumPaybackRatio = _minimumPaybackRatio;
+        _setWithdrawalPeriod(604800);
     }
 
     function deposit(uint256 amount) external whenNotPaused {
@@ -220,7 +221,7 @@ contract OnChainSymmioVault is
         );
 
         require(
-            request.acceptedWithdawRequestTimestamp + WITHDRAWAL_PERIOD <= block.timestamp, "SymmioSolverDepositor: Request not pass withdrawal period"
+            request.acceptedWithdawRequestTimestamp + withdrawalPeriod <= block.timestamp, "SymmioSolverDepositor: Request not pass withdrawal period"
         );
 
         request.status = RequestStatus.Done;
@@ -247,6 +248,10 @@ contract OnChainSymmioVault is
         );
         emit SymmioAddressUpdatedEvent(_symmioAddress);
     }
+    
+    function setWithdrawalPeriod(uint256 withdrawalPeriod_) public onlyRole(SETTER_ROLE) {
+        _setWithdrawalPeriod(withdrawalPeriod_);
+    }
 
     function setSolver(address _solver) public onlyRole(SETTER_ROLE) {
         require(_solver != address(0), "SymmioSolverDepositor: Zero address");
@@ -269,6 +274,11 @@ contract OnChainSymmioVault is
 
     function unpause() external onlyRole(UNPAUSER_ROLE) {
         _unpause();
+    }
+
+    function _setWithdrawalPeriod(uint256 withdrawalPeriod_) internal {
+        withdrawalPeriod = withdrawalPeriod_;
+        emit WithdrawalPeriodUpdate(withdrawalPeriod_);
     }
 
     function _updateCollateral() internal {
