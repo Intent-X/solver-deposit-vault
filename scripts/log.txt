@@ -34,3 +34,19 @@ Verifying contract...
 Successfully submitted source code for contract
 contracts/OnChainSymmioVault.sol:OnChainSymmioVault at 0xC4369Fbe8f4ADf8e4F93fCD1D0f68f67e0aac473
 for verification on the block explorer. Waiting for verification result...
+
+Deploying contracts with the account: 0xf1d63df1CD64a3f3A8F440bAba619dbB4baBB020
+{
+  proxy: '0xB6d340Af68279326402139C30934317929535D32',
+  admin: '0x4c15Bf47E901125FFe606204628081FC07c3dCbE',
+  implementation: '0x4b87d28edaa77D8032f4AC8d260b7551be57fd8f'
+}
+Verifying contract...
+Successfully submitted source code for contract
+contracts/SymmioVaultLpToken.sol:SymmioVaultLpToken at 0x4b87d28edaa77D8032f4AC8d260b7551be57fd8f
+for verification on the block explorer. Waiting for verification result...
+
+Successfully verified contract SymmioVaultLpToken on the block explorer.
+https://basescan.org/address/0x4b87d28edaa77D8032f4AC8d260b7551be57fd8f#code
+
+Contract verified!
