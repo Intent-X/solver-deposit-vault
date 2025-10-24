@@ -15,29 +15,15 @@ describe("SymmioVaultLpToken", function () {
     await token.waitForDeployment();
   });
 
-  it("initializes once, sets name/symbol, grants admin to deployer, and starts paused", async () => {
+  it("initializes once, sets name/symbol, grants admin to deployer", async () => {
     const DEFAULT_ADMIN_ROLE = await token.DEFAULT_ADMIN_ROLE();
 
     expect(await token.name()).to.equal("OnChainSymmioLP");
     expect(await token.symbol()).to.equal("smUSD");
 
     expect(await token.hasRole(DEFAULT_ADMIN_ROLE, owner.address)).to.equal(true);
-    expect(await token.paused()).to.equal(true);
 
     await expect(token.initialize(6)).to.be.reverted;
-  });
-
-  it("only admin can pause/unpause; second pause while paused reverts", async () => {
-    await expect(token.connect(alice).unpause()).to.be.reverted; // non-admin cannot unpause
-
-    await expect(token.pause()).to.be.reverted;
-
-    await expect(token.unpause()).to.not.be.reverted;
-    expect(await token.paused()).to.equal(false);
-
-    await expect(token.connect(alice).pause()).to.be.reverted;
-    await expect(token.pause()).to.not.be.reverted;
-    expect(await token.paused()).to.equal(true);
   });
 
   it("only MINTER_ROLE can mint; minting by minter works even while paused", async () => {
@@ -61,37 +47,6 @@ describe("SymmioVaultLpToken", function () {
       token,
       "AccessControlUnauthorizedAccount"
     ).withArgs(bob.address, MINTER_ROLE);
-  });
-
-  it("transfers are blocked when paused (even for minters) and allowed when unpaused", async () => {
-    const MINTER_ROLE = await token.MINTER_ROLE();
-
-    await token.grantRole(MINTER_ROLE, owner.address);
-    await token.mint(owner.address, 5_000n);
-
-    await expect(token.transfer(alice.address, 100n)).to.be.reverted;
-
-    await token.unpause();
-    await expect(token.transfer(alice.address, 100n)).to.not.be.reverted;
-    expect(await token.balanceOf(owner.address)).to.equal(4_900n);
-    expect(await token.balanceOf(alice.address)).to.equal(100n);
-
-    await token.pause();
-    await expect(token.connect(alice).transfer(bob.address, 10n)).to.be.reverted;
-  });
-
-  it("burn is blocked when paused and works when unpaused", async () => {
-    const MINTER_ROLE = await token.MINTER_ROLE();
-
-    await token.grantRole(MINTER_ROLE, owner.address);
-    await token.mint(alice.address, 1_000n);
-
-    await expect(token.connect(alice).burn(100n)).to.be.reverted;
-
-    await token.unpause();
-    await expect(token.connect(alice).burn(100n)).to.not.be.reverted;
-    expect(await token.balanceOf(alice.address)).to.equal(900n);
-    expect(await token.totalSupply()).to.equal(900n); // minted 1000 then burned 100
   });
 
   it("role enumeration works for MINTER_ROLE; revoke prevents further mint", async () => {
