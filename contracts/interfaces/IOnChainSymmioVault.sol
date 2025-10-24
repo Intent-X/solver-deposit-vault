@@ -19,6 +19,8 @@ interface IOnChainSymmioVault {
         Canceled
     }
 
+    event WithdrawalPeriodUpdate(uint256 withdrawalPeriod);
+    
     event Deposit(address indexed depositor, uint256 amount);
     event WithdrawRequestEvent(
         uint256 indexed requestId,
