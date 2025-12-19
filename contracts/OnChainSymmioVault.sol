@@ -120,7 +120,8 @@ contract OnChainSymmioVault is
                 minAmountOut: minAmountOut,
                 status: RequestStatus.Pending,
                 acceptedRatio: 0,
-                acceptedWithdrawRequestTimestamp: 0
+                acceptedWithdrawRequestTimestamp: 0,
+                claimableAt: 0
             })
         );
         emit WithdrawRequestEvent(
