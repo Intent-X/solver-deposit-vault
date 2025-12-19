@@ -192,6 +192,9 @@ contract OnChainSymmioVault is
             withdrawRequests[id].acceptedRatio = _paybackRatio;
             withdrawRequests[id].acceptedWithdrawRequestTimestamp = block
                 .timestamp;
+            withdrawRequests[id].claimableAt =
+                block.timestamp +
+                withdrawalPeriod;
         }
 
         require(
@@ -241,8 +244,7 @@ contract OnChainSymmioVault is
         );
 
         require(
-            request.acceptedWithdrawRequestTimestamp + withdrawalPeriod <=
-                block.timestamp,
+            request.claimableAt <= block.timestamp,
             "SymmioSolverDepositor: Request not pass withdrawal period"
         );
 
