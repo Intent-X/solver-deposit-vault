@@ -40,6 +40,7 @@ contract OnChainSymmioVault is
     uint256 public collateralTokenDecimals;
     WithdrawRequest[] public withdrawRequests;
     uint256 public withdrawalPeriod;
+    mapping(address => uint256) public pendingWithdrawalAmount;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -74,7 +75,8 @@ contract OnChainSymmioVault is
             "SymmioSolverDepositor: Amount must be greater than 0"
         );
         require(
-            currentDeposit + amount <= depositLimit,
+            currentDeposit + amount + pendingWithdrawalAmount[_msgSender()] <=
+                depositLimit,
             "SymmioSolverDepositor: Deposit limit reached"
         );
         SymmioVaultLpToken lpToken = SymmioVaultLpToken(lpTokenAddress);
@@ -121,6 +123,7 @@ contract OnChainSymmioVault is
                 claimableAt: 0
             })
         );
+        pendingWithdrawalAmount[_msgSender()] += amount;
         emit WithdrawRequestEvent(
             withdrawRequests.length - 1,
             _msgSender(),
@@ -144,6 +147,7 @@ contract OnChainSymmioVault is
             "SymmioSolverDepositor: Invalid status"
         );
         request.status = RequestStatus.Canceled;
+        pendingWithdrawalAmount[_msgSender()] -= request.amount;
         SymmioVaultLpToken(lpTokenAddress).mint(_msgSender(), request.amount);
         emit WithdrawRequestCanceled(id);
     }
@@ -193,6 +197,9 @@ contract OnChainSymmioVault is
             withdrawRequests[id].claimableAt =
                 block.timestamp +
                 withdrawalPeriod;
+            pendingWithdrawalAmount[
+                withdrawRequests[id].sender
+            ] -= withdrawRequests[id].amount;
         }
 
         require(
