@@ -20,7 +20,7 @@ interface IOnChainSymmioVault {
     }
 
     event WithdrawalPeriodUpdate(uint256 withdrawalPeriod);
-    
+
     event Deposit(address indexed depositor, uint256 amount);
     event WithdrawRequestEvent(
         uint256 indexed requestId,
@@ -39,8 +39,11 @@ interface IOnChainSymmioVault {
         address indexed receiver
     );
     event SymmioAddressUpdatedEvent(address indexed newSymmioAddress);
-    event DepositLimitUpdatedEvent(uint256 depositLimit, uint256 depositPerUserLimit);
-
+    event DepositLimitUpdatedEvent(
+        uint256 depositLimit,
+        uint256 depositPerUserLimit
+    );
+    event MinimumPaybackRatioUpdatedEvent(uint256 minimumPaybackRatio);
     event SolverUpdatedEvent(address indexed solver);
     event DepositToSymmio(
         address indexed depositor,
