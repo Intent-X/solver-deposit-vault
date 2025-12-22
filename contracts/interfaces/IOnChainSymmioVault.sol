@@ -9,7 +9,7 @@ interface IOnChainSymmioVault {
         uint256 minAmountOut;
         RequestStatus status;
         uint256 acceptedRatio;
-        uint256 acceptedWithdawRequestTimestamp;
+        uint256 acceptedWithdrawRequestTimestamp;
     }
 
     enum RequestStatus {
