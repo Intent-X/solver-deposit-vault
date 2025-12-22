@@ -97,10 +97,7 @@ contract OnChainSymmioVault is
         currentDeposit += amount;
         emit Deposit(_msgSender(), amount);
         
-        require(
-            collateralToken.approve(address(symmio), amount),
-            "SymmioSolverDepositor: Approve failed"
-        );
+        collateralToken.forceApprove(address(symmio), amount);
         symmio.depositFor(solver, amount);
         emit DepositToSymmio(_msgSender(), solver, amount);
     }
