@@ -10,6 +10,7 @@ interface IOnChainSymmioVault {
         RequestStatus status;
         uint256 acceptedRatio;
         uint256 acceptedWithdawRequestTimestamp;
+        uint256 claimableAt;
     }
 
     enum RequestStatus {
