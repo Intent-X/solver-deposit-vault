@@ -5,6 +5,7 @@
 pragma solidity =0.8.28;
 
 import "@openzeppelin/contracts-upgradeable/access/extensions/AccessControlEnumerableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardTransientUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -15,7 +16,8 @@ import "./interfaces/IOnChainSymmioVault.sol";
 contract OnChainSymmioVault is
     IOnChainSymmioVault,
     AccessControlEnumerableUpgradeable,
-    PausableUpgradeable
+    PausableUpgradeable,
+    ReentrancyGuardTransientUpgradeable
 {
     // Use SafeERC20 for safer token transfers
     using SafeERC20 for IERC20;
@@ -70,7 +72,7 @@ contract OnChainSymmioVault is
         _setWithdrawalPeriod(604800);
     }
 
-    function deposit(uint256 amount) external whenNotPaused {
+    function deposit(uint256 amount) external whenNotPaused nonReentrant {
         require(
             currentDeposit + amount <= depositLimit,
             "SymmioSolverDepositor: Deposit limit reached"
