@@ -37,6 +37,7 @@ contract OnChainSymmioVault is
     uint256 public collateralTokenDecimals;
     WithdrawRequest[] public withdrawRequests;
     uint256 public withdrawalPeriod;
+    mapping(address => uint256) public pendingWithdrawalAmount;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -77,7 +78,7 @@ contract OnChainSymmioVault is
         );
         SymmioVaultLpToken lpToken = SymmioVaultLpToken(lpTokenAddress);
         require(
-            lpToken.balanceOf(_msgSender()) + amount <= depositPerUserLimit,
+            lpToken.balanceOf(_msgSender()) + amount + pendingWithdrawalAmount[_msgSender()] <= depositPerUserLimit,
             "SymmioSolverDepositor: Deposit per user limit reached"
         );
 
@@ -125,6 +126,7 @@ contract OnChainSymmioVault is
                 acceptedWithdawRequestTimestamp: 0
             })
         );
+        pendingWithdrawalAmount[_msgSender()] += amount;
         emit WithdrawRequestEvent(
             withdrawRequests.length - 1,
             _msgSender(),
@@ -148,6 +150,7 @@ contract OnChainSymmioVault is
             "SymmioSolverDepositor: Invalid status"
         );
         request.status = RequestStatus.Canceled;
+        pendingWithdrawalAmount[_msgSender()] -= request.amount;
         SymmioVaultLpToken(lpTokenAddress).mint(_msgSender(), request.amount);
         emit WithdrawRequestCanceled(id);
     }
@@ -193,6 +196,9 @@ contract OnChainSymmioVault is
             withdrawRequests[id].status = RequestStatus.Ready;
             withdrawRequests[id].acceptedRatio = _paybackRatio;
             withdrawRequests[id].acceptedWithdawRequestTimestamp = block.timestamp;
+            pendingWithdrawalAmount[
+                withdrawRequests[id].sender
+            ] -= withdrawRequests[id].amount;
         }
 
         require(
