@@ -122,7 +122,8 @@ contract OnChainSymmioVault is
                 minAmountOut: minAmountOut,
                 status: RequestStatus.Pending,
                 acceptedRatio: 0,
-                acceptedWithdawRequestTimestamp: 0
+                acceptedWithdawRequestTimestamp: 0,
+                claimableAt: 0
             })
         );
         emit WithdrawRequestEvent(
@@ -193,6 +194,9 @@ contract OnChainSymmioVault is
             withdrawRequests[id].status = RequestStatus.Ready;
             withdrawRequests[id].acceptedRatio = _paybackRatio;
             withdrawRequests[id].acceptedWithdawRequestTimestamp = block.timestamp;
+            withdrawRequests[id].claimableAt =
+                block.timestamp +
+                withdrawalPeriod;
         }
 
         require(
@@ -221,7 +225,8 @@ contract OnChainSymmioVault is
         );
 
         require(
-            request.acceptedWithdawRequestTimestamp + withdrawalPeriod <= block.timestamp, "SymmioSolverDepositor: Request not pass withdrawal period"
+            request.claimableAt <= block.timestamp,
+            "SymmioSolverDepositor: Request not pass withdrawal period"
         );
 
         request.status = RequestStatus.Done;
