@@ -74,10 +74,6 @@ contract OnChainSymmioVault is
 
     function deposit(uint256 amount) external whenNotPaused nonReentrant {
         require(
-            amount > 0,
-            "SymmioSolverDepositor: Amount must be greater than 0"
-        );
-        require(
             currentDeposit + amount <= depositLimit,
             "SymmioSolverDepositor: Deposit limit reached"
         );
@@ -125,7 +121,7 @@ contract OnChainSymmioVault is
                 minAmountOut: minAmountOut,
                 status: RequestStatus.Pending,
                 acceptedRatio: 0,
-                acceptedWithdrawRequestTimestamp: 0
+                acceptedWithdawRequestTimestamp: 0
             })
         );
         emit WithdrawRequestEvent(
@@ -195,7 +191,7 @@ contract OnChainSymmioVault is
             currentDeposit -= withdrawRequests[id].amount;
             withdrawRequests[id].status = RequestStatus.Ready;
             withdrawRequests[id].acceptedRatio = _paybackRatio;
-            withdrawRequests[id].acceptedWithdrawRequestTimestamp = block.timestamp;
+            withdrawRequests[id].acceptedWithdawRequestTimestamp = block.timestamp;
         }
 
         require(
@@ -245,7 +241,7 @@ contract OnChainSymmioVault is
         );
 
         require(
-            request.acceptedWithdrawRequestTimestamp + withdrawalPeriod <= block.timestamp, "SymmioSolverDepositor: Request not pass withdrawal period"
+            request.acceptedWithdawRequestTimestamp + withdrawalPeriod <= block.timestamp, "SymmioSolverDepositor: Request not pass withdrawal period"
         );
 
         request.status = RequestStatus.Done;
