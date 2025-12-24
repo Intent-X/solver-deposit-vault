@@ -208,27 +208,6 @@ contract OnChainSymmioVault is
         );
     }
 
-    function withdrawNotLockedCollateralTokens(
-        address receiver,
-        uint256 amount
-    ) external onlyRole(BALANCER_ROLE) whenNotPaused {
-        require(
-            receiver != address(0),
-            "SymmioSolverDepositor: Zero address for receiver"
-        );
-        require(
-            amount > 0,
-            "SymmioSolverDepositor: Amount must be greater than 0"
-        );
-        IERC20 collateralToken = IERC20(collateralTokenAddress);
-        uint256 currentBalance = collateralToken.balanceOf(address(this));
-        require(
-            amount <= currentBalance - lockedBalance,
-            "SymmioSolverDepositor: Insufficient balance"
-        );
-        collateralToken.safeTransfer(receiver, amount);
-    }
-
     function claimForWithdrawRequest(uint256 requestId) external whenNotPaused {
         require(
             requestId < withdrawRequests.length,
