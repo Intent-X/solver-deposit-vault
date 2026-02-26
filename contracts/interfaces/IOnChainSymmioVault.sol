@@ -34,4 +34,5 @@ interface IOnChainSymmioVault {
     event MinimumPaybackRatioUpdatedEvent(uint256 minimumPaybackRatio);
     event SolverUpdatedEvent(address indexed solver);
     event DepositToSymmio(address indexed depositor, address indexed solver, uint256 amount);
+    event SignerUpdatedEvent(address indexed signer);
 }

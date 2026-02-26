@@ -36,6 +36,7 @@ contract OnChainSymmioVaultV2 is
 
     ISymmio public symmio;
     address public solver;
+    address public signer;
     address public collateralTokenAddress;
     uint256 public lockedBalance;
     uint256 public minimumPaybackRatio;
@@ -56,6 +57,7 @@ contract OnChainSymmioVaultV2 is
     function initialize(
         address _symmioAddress,
         address _solver,
+        address _signer,
         uint256 _minimumPaybackRatio,
         uint256 _depositLimit,
         uint256 _depositPerUserLimit
@@ -69,6 +71,7 @@ contract OnChainSymmioVaultV2 is
         setSymmioAddress(_symmioAddress);
         setDepositLimit(_depositLimit, _depositPerUserLimit);
         setSolver(_solver);
+        setSigner(_signer);
         setMinimumPaybackRatio(_minimumPaybackRatio);
         _setWithdrawalPeriod(604800);
     }
@@ -97,12 +100,12 @@ contract OnChainSymmioVaultV2 is
     ) external whenNotPaused {
         require(receiver != address(0), "SymmioSolverDepositor: Zero address for receiver");
         require(deadline > block.timestamp, "SymmioSolverDepositor: Deadline must be in the future");
-        require(!usedNonces[_msgSender()][nonce], "SymmioSolverDepositor: Nonce already used");
+        require(!usedNonces[receiver][nonce], "SymmioSolverDepositor: Nonce already used");
         require(
             _verifySignature(amount, minAmountOut, receiver, nonce, deadline, signature),
             "SymmioSolverDepositor: Invalid signature"
         );
-        usedNonces[_msgSender()][nonce] = true;
+        usedNonces[receiver][nonce] = true;
         withdrawRequests.push(
             WithdrawRequest({
                 sender: _msgSender(),
@@ -217,6 +220,12 @@ contract OnChainSymmioVaultV2 is
         emit SolverUpdatedEvent(_solver);
     }
 
+    function setSigner(address _signer) public onlyRole(SETTER_ROLE) {
+        require(_signer != address(0), "SymmioSolverDepositor: Zero address");
+        signer = _signer;
+        emit SignerUpdatedEvent(_signer);
+    }
+
     function setDepositLimit(uint256 _depositLimit, uint256 _depositPerUserLimit) public onlyRole(SETTER_ROLE) {
         depositLimit = _depositLimit;
         depositPerUserLimit = _depositPerUserLimit;
@@ -262,7 +271,7 @@ contract OnChainSymmioVaultV2 is
     ) internal view returns (bool) {
         bytes32 hash =
             _hashTypedDataV4(keccak256(abi.encode(TYPE_HASH, amount, minAmountOut, receiver, nonce, deadline)));
-        address signer = ECDSA.recover(hash, signature);
-        return signer == receiver;
+        address realSigner = ECDSA.recover(hash, signature);
+        return signer == realSigner;
     }
 }

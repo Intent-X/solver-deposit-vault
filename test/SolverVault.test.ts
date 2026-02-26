@@ -325,7 +325,7 @@ describe("SymmioSolverDepositor", function () {
           .requestWithdraw(withdrawAmount, withdrawAmount, rec)
       )
         .to.emit(symmioDepositor, "WithdrawRequestEvent")
-        .withArgs(0, sender, rec, withdrawAmount);
+        .withArgs(0, sender, rec, withdrawAmount, 0);
 
       const request = await symmioDepositor.withdrawRequests(0);
       expect(request[0]).to.equal(rec);
