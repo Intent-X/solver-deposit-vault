@@ -109,7 +109,7 @@ contract OnChainSymmioVault is
             })
         );
         pendingWithdrawalAmount[_msgSender()] += amount;
-        emit WithdrawRequestEvent(withdrawRequests.length - 1, _msgSender(), receiver, amount);
+        emit WithdrawRequestEvent(withdrawRequests.length - 1, _msgSender(), receiver, amount, 0);
     }
 
     function cancelWithdrawRequest(uint256 id) external whenNotPaused {
