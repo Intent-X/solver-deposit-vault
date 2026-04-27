@@ -57,20 +57,28 @@ const config: HardhatUserConfig = {
     sources: "./contracts",
     tests: "./test",
   },
-  solidity: {
-    version: "0.8.28",
-    settings: {
-      evmVersion: "cancun",
-      metadata: {
-        bytecodeHash: "none",
+    solidity: {
+    compilers: [
+      {
+        version: "0.8.18",
+        settings: {
+          optimizer: {
+            enabled : true,
+            runs: 2048,
+          }
+        }
       },
-      optimizer: {
-        enabled: true,
-        runs: 200000,
+      {
+        version: "0.8.28",
+        settings: {
+          optimizer: {
+            enabled : true,
+            runs: 2048,
+          }
+        }
       },
-      viaIR: true,
+    ]
     },
-  },
 };
 
 export default config;
