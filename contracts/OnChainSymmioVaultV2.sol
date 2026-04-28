@@ -2,22 +2,24 @@
 // This contract is licensed under the SYMM Core Business Source License 1.1
 // Copyright (c) 2023 Symmetry Labs AG
 // For more information, see https://docs.symm.io/legal-disclaimer/license
-pragma solidity =0.8.28;
+pragma solidity >=0.8.18;
 
-import "@openzeppelin/contracts-upgradeable/access/extensions/AccessControlEnumerableUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardTransientUpgradeable.sol";
-import "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/access/AccessControlEnumerableUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "./SymmioVaultLpToken.sol";
-import "./interfaces/ISymmio.sol";
+import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "./interfaces/IOnChainSymmioVault.sol";
+import "./interfaces/ISymmio.sol";
 
-contract OnChainSymmioVault is
+contract OnChainSymmioVaultV2 is
     IOnChainSymmioVault,
     AccessControlEnumerableUpgradeable,
     PausableUpgradeable,
-    ReentrancyGuardTransientUpgradeable
+    EIP712Upgradeable,
+    ReentrancyGuardUpgradeable
 {
     // Use SafeERC20 for safer token transfers
     using SafeERC20 for IERC20;
@@ -27,20 +29,22 @@ contract OnChainSymmioVault is
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
     bytes32 public constant UNPAUSER_ROLE = keccak256("UNPAUSER_ROLE");
     uint256 public constant MIN_PAYBACK_RATIO = 0.5e18; // 50%
+    bytes32 public constant TYPE_HASH = keccak256(
+        "WithdrawRequest(uint256 amount,uint256 minAmountOut,address receiver,uint256 nonce,uint256 deadline)"
+    );
 
     ISymmio public symmio;
     address public solver;
+    address public signer;
     address public collateralTokenAddress;
-    address public lpTokenAddress;
     uint256 public lockedBalance;
-    uint256 public minimumPaybackRatio;
     uint256 public depositLimit;
-    uint256 public depositPerUserLimit;
     uint256 public currentDeposit;
     uint256 public collateralTokenDecimals;
     WithdrawRequest[] public withdrawRequests;
     uint256 public withdrawalPeriod;
     mapping(address => uint256) public pendingWithdrawalAmount;
+    mapping(address => mapping(uint256 => bool)) public usedNonces;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -49,38 +53,42 @@ contract OnChainSymmioVault is
 
     function initialize(
         address _symmioAddress,
-        address _lpTokenAddress,
         address _solver,
-        uint256 _minimumPaybackRatio,
-        uint256 _depositLimit,
-        uint256 _depositPerUserLimit
+        address _signer,
+        address _balancer,
+        address _multisig
     ) external initializer {
-        __AccessControl_init();
         __Pausable_init();
+        __EIP712_init("OnChainSymmioVaultV2", "1");
+        __ReentrancyGuard_init();
+        __AccessControl_init();
 
-        _grantRole(DEFAULT_ADMIN_ROLE, _msgSender());
+        _grantRole(DEFAULT_ADMIN_ROLE, _multisig);
+        _grantRole(SETTER_ROLE, _multisig);
+        _grantRole(PAUSER_ROLE, _multisig);
+        _grantRole(UNPAUSER_ROLE, _multisig);
+
+        _grantRole(BALANCER_ROLE, _balancer);
+
         _grantRole(SETTER_ROLE, _msgSender());
 
         setSymmioAddress(_symmioAddress);
-        _setLpTokenAddress(_lpTokenAddress);
-        setDepositLimit(_depositLimit, _depositPerUserLimit);
         setSolver(_solver);
-        setMinimumPaybackRatio(_minimumPaybackRatio);
-        _setWithdrawalPeriod(604800);
+        setSigner(_signer);
+
+        setDepositLimit(10_000_000 * 10**6);
+        _setWithdrawalPeriod(0);
+
+        _revokeRole(SETTER_ROLE, _msgSender());
+
     }
 
     function deposit(uint256 amount) external whenNotPaused nonReentrant {
         require(amount > 0, "SymmioSolverDepositor: Amount must be greater than 0");
         require(currentDeposit + amount <= depositLimit, "SymmioSolverDepositor: Deposit limit reached");
-        SymmioVaultLpToken lpToken = SymmioVaultLpToken(lpTokenAddress);
-        require(
-            lpToken.balanceOf(_msgSender()) + amount + pendingWithdrawalAmount[_msgSender()] <= depositPerUserLimit,
-            "SymmioSolverDepositor: Deposit per user limit reached"
-        );
 
         IERC20 collateralToken = IERC20(collateralTokenAddress);
         collateralToken.safeTransferFrom(_msgSender(), address(this), amount);
-        lpToken.mint(_msgSender(), amount);
         currentDeposit += amount;
         emit Deposit(_msgSender(), amount);
 
@@ -89,13 +97,22 @@ contract OnChainSymmioVault is
         emit DepositToSymmio(_msgSender(), solver, amount);
     }
 
-    function requestWithdraw(uint256 amount, uint256 minAmountOut, address receiver) external whenNotPaused {
-        require(
-            SymmioVaultLpToken(lpTokenAddress).balanceOf(_msgSender()) >= amount,
-            "SymmioSolverDepositor: Insufficient token balance"
-        );
-        SymmioVaultLpToken(lpTokenAddress).burnFrom(_msgSender(), amount);
+    function requestWithdraw(
+        uint256 amount,
+        uint256 minAmountOut,
+        address receiver,
+        uint256 nonce,
+        uint256 deadline,
+        bytes memory signature
+    ) external whenNotPaused {
         require(receiver != address(0), "SymmioSolverDepositor: Zero address for receiver");
+        require(deadline > block.timestamp, "SymmioSolverDepositor: Deadline must be in the future");
+        require(!usedNonces[receiver][nonce], "SymmioSolverDepositor: Nonce already used");
+        require(
+            _verifySignature(amount, minAmountOut, receiver, nonce, deadline, signature),
+            "SymmioSolverDepositor: Invalid signature"
+        );
+        usedNonces[receiver][nonce] = true;
         withdrawRequests.push(
             WithdrawRequest({
                 sender: _msgSender(),
@@ -103,13 +120,13 @@ contract OnChainSymmioVault is
                 amount: amount,
                 minAmountOut: minAmountOut,
                 status: RequestStatus.Pending,
-                acceptedRatio: 0,
+                acceptedAmount: 0,
                 acceptedWithdrawRequestTimestamp: 0,
                 claimableAt: 0
             })
         );
         pendingWithdrawalAmount[_msgSender()] += amount;
-        emit WithdrawRequestEvent(withdrawRequests.length - 1, _msgSender(), receiver, amount);
+        emit WithdrawRequestEvent(withdrawRequests.length - 1, _msgSender(), receiver, amount, nonce);
     }
 
     function cancelWithdrawRequest(uint256 id) external whenNotPaused {
@@ -119,18 +136,29 @@ contract OnChainSymmioVault is
         require(request.status == RequestStatus.Pending, "SymmioSolverDepositor: Invalid status");
         request.status = RequestStatus.Canceled;
         pendingWithdrawalAmount[_msgSender()] -= request.amount;
-        SymmioVaultLpToken(lpTokenAddress).mint(_msgSender(), request.amount);
         emit WithdrawRequestCanceled(id);
     }
 
-    function acceptWithdrawRequest(uint256 providedAmount, uint256[] memory _acceptedRequestIds, uint256 _paybackRatio)
+
+    function rejectWithdrawRequest(uint256 id)
+        external
+        onlyRole(BALANCER_ROLE)
+        whenNotPaused
+    {
+        require(id < withdrawRequests.length, "SymmioSolverDepositor: Invalid request ID");
+        WithdrawRequest storage request = withdrawRequests[id];
+        require(request.status == RequestStatus.Pending, "SymmioSolverDepositor: Invalid status");
+        request.status = RequestStatus.Rejected;
+        pendingWithdrawalAmount[request.sender] -= request.amount;
+        emit WithdrawRequestRejected(id);
+    }
+
+    function acceptWithdrawRequest(uint256 providedAmount, uint256[] memory _acceptedRequestIds, uint256[] memory _acceptedAmounts)
         external
         onlyRole(BALANCER_ROLE)
         whenNotPaused
     {
         IERC20(collateralTokenAddress).safeTransferFrom(_msgSender(), address(this), providedAmount);
-        require(_paybackRatio >= minimumPaybackRatio, "SymmioSolverDepositor: Payback ratio is too low");
-        require(_paybackRatio <= 1e18, "SymmioSolverDepositor: Payback ratio is too high");
         uint256 totalRequiredBalance = lockedBalance;
 
         for (uint256 i = 0; i < _acceptedRequestIds.length; i++) {
@@ -139,7 +167,7 @@ contract OnChainSymmioVault is
             require(
                 withdrawRequests[id].status == RequestStatus.Pending, "SymmioSolverDepositor: Invalid accepted request"
             );
-            uint256 amountOut = (withdrawRequests[id].amount * _paybackRatio) / 1e18;
+            uint256 amountOut = _acceptedAmounts[i];
             require(
                 amountOut >= withdrawRequests[id].minAmountOut,
                 "SymmioSolverDepositor: Payback ratio is too low for this request"
@@ -147,7 +175,7 @@ contract OnChainSymmioVault is
             totalRequiredBalance += amountOut;
             currentDeposit -= withdrawRequests[id].amount;
             withdrawRequests[id].status = RequestStatus.Ready;
-            withdrawRequests[id].acceptedRatio = _paybackRatio;
+            withdrawRequests[id].acceptedAmount = amountOut;
             withdrawRequests[id].acceptedWithdrawRequestTimestamp = block.timestamp;
             withdrawRequests[id].claimableAt = block.timestamp + withdrawalPeriod;
             pendingWithdrawalAmount[withdrawRequests[id].sender] -= withdrawRequests[id].amount;
@@ -158,7 +186,7 @@ contract OnChainSymmioVault is
             "SymmioSolverDepositor: Insufficient contract balance"
         );
         lockedBalance = totalRequiredBalance;
-        emit WithdrawRequestAcceptedEvent(providedAmount, _acceptedRequestIds, _paybackRatio);
+        emit WithdrawRequestAcceptedEvent(providedAmount, _acceptedRequestIds, _acceptedAmounts);
     }
 
     function withdrawNotLockedCollateralTokens(address receiver, uint256 amount)
@@ -183,7 +211,7 @@ contract OnChainSymmioVault is
         require(request.claimableAt <= block.timestamp, "SymmioSolverDepositor: Request not pass withdrawal period");
 
         request.status = RequestStatus.Done;
-        uint256 amount = (request.amount * request.acceptedRatio) / 1e18;
+        uint256 amount = request.acceptedAmount;
         lockedBalance -= amount;
         IERC20(collateralTokenAddress).safeTransfer(request.receiver, amount);
         emit WithdrawClaimedEvent(requestId, request.receiver);
@@ -211,17 +239,15 @@ contract OnChainSymmioVault is
         emit SolverUpdatedEvent(_solver);
     }
 
-    function setDepositLimit(uint256 _depositLimit, uint256 _depositPerUserLimit) public onlyRole(SETTER_ROLE) {
-        depositLimit = _depositLimit;
-        depositPerUserLimit = _depositPerUserLimit;
-        emit DepositLimitUpdatedEvent(_depositLimit, _depositPerUserLimit);
+    function setSigner(address _signer) public onlyRole(SETTER_ROLE) {
+        require(_signer != address(0), "SymmioSolverDepositor: Zero address");
+        signer = _signer;
+        emit SignerUpdatedEvent(_signer);
     }
 
-    function setMinimumPaybackRatio(uint256 _minimumPaybackRatio) public onlyRole(SETTER_ROLE) {
-        require(_minimumPaybackRatio >= MIN_PAYBACK_RATIO, "SymmioSolverDepositor: Minimum buyback ratio is too low");
-        require(_minimumPaybackRatio <= 1e18, "SymmioSolverDepositor: Minimum buyback ratio is too high");
-        minimumPaybackRatio = _minimumPaybackRatio;
-        emit MinimumPaybackRatioUpdatedEvent(_minimumPaybackRatio);
+    function setDepositLimit(uint256 _depositLimit) public onlyRole(SETTER_ROLE) {
+        depositLimit = _depositLimit;
+        emit DepositLimitUpdatedEvent(_depositLimit);
     }
 
     function pause() external onlyRole(PAUSER_ROLE) {
@@ -246,13 +272,17 @@ contract OnChainSymmioVault is
         );
     }
 
-    function _setLpTokenAddress(address _symmioSolverDepositorTokenAddress) internal {
-        require(_symmioSolverDepositorTokenAddress != address(0), "SymmioSolverDepositor: Zero address");
-        lpTokenAddress = _symmioSolverDepositorTokenAddress;
-        uint256 lpTokenDecimals = SymmioVaultLpToken(_symmioSolverDepositorTokenAddress).decimals();
-        require(
-            lpTokenDecimals == collateralTokenDecimals,
-            "SymmioSolverDepositor: LP token decimals should be the same as collateral token"
-        );
+    function _verifySignature(
+        uint256 amount,
+        uint256 minAmountOut,
+        address receiver,
+        uint256 nonce,
+        uint256 deadline,
+        bytes memory signature
+    ) internal view returns (bool) {
+        bytes32 hash =
+            _hashTypedDataV4(keccak256(abi.encode(TYPE_HASH, amount, minAmountOut, receiver, nonce, deadline)));
+        address realSigner = ECDSA.recover(hash, signature);
+        return signer == realSigner;
     }
 }
