@@ -6,4 +6,6 @@ pragma solidity ^0.8.19;
 
 interface IMultiAccount {
     function _call(address account, bytes[] memory _callDatas) external returns (bytes[] memory);
+
+    function owners(address account) external view returns (address);
 }

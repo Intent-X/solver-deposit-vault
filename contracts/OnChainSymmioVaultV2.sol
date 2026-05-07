@@ -108,6 +108,10 @@ contract OnChainSymmioVaultV2 is
         require(currentDeposit + amount <= depositLimit, "SymmioSolverDepositor: Deposit limit reached");
         require(address(multiAccount) != address(0), "SymmioSolverDepositor: MultiAccount not set");
         require(subaccount != address(0), "SymmioSolverDepositor: Zero subaccount");
+        require(
+            multiAccount.owners(subaccount) == _msgSender(),
+            "SymmioSolverDepositor: Caller is not subaccount owner"
+        );
 
         // Snapshot the solver's SYMM-side allocated balance before delegating
         // the internalTransfer through MultiAccount. We assert the post-call
