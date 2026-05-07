@@ -37,4 +37,25 @@ interface IOnChainSymmioVault {
     event SolverUpdatedEvent(address indexed solver);
     event DepositToSymmio(address indexed depositor, address indexed solver, uint256 amount);
     event SignerUpdatedEvent(address indexed signer);
+    event MultiAccountUpdatedEvent(address multiAccount);
+    event SolverSubAccountUpdatedEvent(address solverSubAccount);
+    event DepositViaInternalTransfer(address indexed user, address indexed subAccount, uint256 amount);
+
+    // ---------------------------------------------------------------------
+    // Functions
+    // ---------------------------------------------------------------------
+    // The pre-existing interface declared events/structs/enums only (no
+    // function signatures). The new internal-transfer deposit pathway is
+    // declared here in a clearly delimited section to keep the contract's
+    // external surface discoverable from the interface.
+
+    /// @notice Alternative deposit pathway. Moves collateral already held by the
+    ///         user inside Symmio (under one of their MultiAccount sub-accounts)
+    ///         into the solver's allocated balance via MultiAccount delegated
+    ///         `internalTransfer`. See `docs/internal-transfer-deposit.md`.
+    /// @param subAccount The user's MultiAccount sub-account holding the deposited
+    ///                   balance to be transferred.
+    /// @param amount     The amount of collateral to internally transfer to the
+    ///                   solver sub-account (in collateral-token decimals).
+    function depositViaInternalTransfer(address subAccount, uint256 amount) external;
 }

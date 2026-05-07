@@ -11,6 +11,7 @@ import "@openzeppelin/contracts-upgradeable/security/PausableUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import "./interfaces/IMultiAccount.sol";
 import "./interfaces/IOnChainSymmioVault.sol";
 import "./interfaces/ISymmio.sol";
 
@@ -45,6 +46,8 @@ contract OnChainSymmioVaultV2 is
     uint256 public withdrawalPeriod;
     mapping(address => uint256) public pendingWithdrawalAmount;
     mapping(address => mapping(uint256 => bool)) public usedNonces;
+    IMultiAccount public multiAccount;
+    address public solverSubAccount;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -95,6 +98,47 @@ contract OnChainSymmioVaultV2 is
         collateralToken.forceApprove(address(symmio), amount);
         symmio.depositFor(solver, amount);
         emit DepositToSymmio(_msgSender(), solver, amount);
+    }
+
+    /// @notice Alternative deposit pathway that moves collateral already held by the user
+    ///         inside Symmio (under one of their MultiAccount sub-accounts) into the solver's
+    ///         allocated balance, without ever moving ERC20 through this contract.
+    /// @dev REVERT STUB. Business logic is intentionally not implemented in this scaffold.
+    ///      See `docs/internal-transfer-deposit.md` for the full design specification.
+    ///
+    ///      Preconditions (planned for impl phase):
+    ///      - The user has a deposited balance on `subAccount` inside Symmio.
+    ///      - The user has granted this vault `delegateAccess` on MultiAccount for the
+    ///        `IAccountFacet.internalTransfer` selector against `subAccount`.
+    ///      - `multiAccount.owners(subAccount) == msg.sender`.
+    ///      - `multiAccount` and `solverSubAccount` are both set (non-zero).
+    ///      - `amount > 0`.
+    ///      - `currentDeposit + amount <= depositLimit`.
+    ///
+    ///      Effects (planned for impl phase):
+    ///      - Calls `multiAccount._call(subAccount, [encodedInternalTransfer])` to move
+    ///        funds from the user's `balances[subAccount]` into
+    ///        `allocatedBalances[solverSubAccount]` on Symmio.
+    ///      - Increments `currentDeposit` by `amount`.
+    ///      - Emits `DepositViaInternalTransfer(msg.sender, subAccount, amount)`.
+    ///
+    ///      Reverts:
+    ///      - See `docs/internal-transfer-deposit.md` Section 6 for the full revert
+    ///        taxonomy (vault-side, MultiAccount-side, and Symmio-side).
+    ///
+    /// @param subAccount The user's MultiAccount sub-account that holds the deposited
+    ///                   balance to be transferred.
+    /// @param amount     The amount of collateral to internally transfer to the solver
+    ///                   sub-account (in collateral-token decimals).
+    function depositViaInternalTransfer(address subAccount, uint256 amount)
+        external
+        whenNotPaused
+        nonReentrant
+    {
+        // silence unused-variable warnings without changing behavior
+        subAccount;
+        amount;
+        require(false, "SymmioSolverDepositor: depositViaInternalTransfer not implemented");
     }
 
     function requestWithdraw(
@@ -248,6 +292,18 @@ contract OnChainSymmioVaultV2 is
     function setDepositLimit(uint256 _depositLimit) public onlyRole(SETTER_ROLE) {
         depositLimit = _depositLimit;
         emit DepositLimitUpdatedEvent(_depositLimit);
+    }
+
+    function setMultiAccount(address _multiAccount) public onlyRole(SETTER_ROLE) {
+        require(_multiAccount != address(0), "SymmioSolverDepositor: Zero address");
+        multiAccount = IMultiAccount(_multiAccount);
+        emit MultiAccountUpdatedEvent(_multiAccount);
+    }
+
+    function setSolverSubAccount(address _solverSubAccount) public onlyRole(SETTER_ROLE) {
+        require(_solverSubAccount != address(0), "SymmioSolverDepositor: Zero address");
+        solverSubAccount = _solverSubAccount;
+        emit SolverSubAccountUpdatedEvent(_solverSubAccount);
     }
 
     function pause() external onlyRole(PAUSER_ROLE) {
