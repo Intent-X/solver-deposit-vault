@@ -10,4 +10,6 @@ interface ISymmio {
     function depositFor(address user, uint256 amount) external;
 
     function internalTransfer(address user, uint256 amount) external;
+
+    function allocatedBalanceOfPartyA(address partyA) external view returns (uint256);
 }

@@ -109,6 +109,14 @@ contract OnChainSymmioVaultV2 is
         require(address(multiAccount) != address(0), "SymmioSolverDepositor: MultiAccount not set");
         require(subaccount != address(0), "SymmioSolverDepositor: Zero subaccount");
 
+        // Snapshot the solver's SYMM-side allocated balance before delegating
+        // the internalTransfer through MultiAccount. We assert the post-call
+        // delta equals `amount` exactly — internalTransfer in SYMMIO 0.8.5
+        // credits accountLayout.allocatedBalances[solver] += amount with no
+        // fees or haircuts, so any deviation indicates the funds were not
+        // received as expected and the tx must revert.
+        uint256 solverAllocatedBefore = symmio.allocatedBalanceOfPartyA(solver);
+
         bytes[] memory calls = new bytes[](1);
         calls[0] = abi.encodeWithSelector(
             ISymmio.internalTransfer.selector,
@@ -116,6 +124,12 @@ contract OnChainSymmioVaultV2 is
             amount
         );
         multiAccount._call(subaccount, calls);
+
+        uint256 solverAllocatedAfter = symmio.allocatedBalanceOfPartyA(solver);
+        require(
+            solverAllocatedAfter - solverAllocatedBefore == amount,
+            "SymmioSolverDepositor: Solver allocated balance mismatch"
+        );
 
         currentDeposit += amount;
         emit DepositFromSymmio(_msgSender(), subaccount, amount);
