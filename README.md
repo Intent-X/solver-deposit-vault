@@ -31,6 +31,7 @@ management of this limit is handled by the 'currentDeposit' variable.
 - **acceptWithdrawRequest:** The Balancer role can accept withdrawal requests, ensuring the payback ratio meets the
   minimum threshold.
 - **claimForWithdrawRequest:** Users can claim their funds after their withdrawal request is accepted.
+- See [docs/internal-transfer-deposit.md](docs/internal-transfer-deposit.md) for the planned Internal Transfer deposit pathway (V2 spec, not yet implemented).
 
 Use the following command for running tests:
 
