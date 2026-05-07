@@ -13,6 +13,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "./interfaces/IOnChainSymmioVault.sol";
 import "./interfaces/ISymmio.sol";
+import "./interfaces/IMultiAccount.sol";
 
 contract OnChainSymmioVaultV2 is
     IOnChainSymmioVault,
@@ -45,6 +46,7 @@ contract OnChainSymmioVaultV2 is
     uint256 public withdrawalPeriod;
     mapping(address => uint256) public pendingWithdrawalAmount;
     mapping(address => mapping(uint256 => bool)) public usedNonces;
+    IMultiAccount public multiAccount;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -95,6 +97,28 @@ contract OnChainSymmioVaultV2 is
         collateralToken.forceApprove(address(symmio), amount);
         symmio.depositFor(solver, amount);
         emit DepositToSymmio(_msgSender(), solver, amount);
+    }
+
+    function depositFromSymmio(address subaccount, uint256 amount)
+        external
+        whenNotPaused
+        nonReentrant
+    {
+        require(amount > 0, "SymmioSolverDepositor: Amount must be greater than 0");
+        require(currentDeposit + amount <= depositLimit, "SymmioSolverDepositor: Deposit limit reached");
+        require(address(multiAccount) != address(0), "SymmioSolverDepositor: MultiAccount not set");
+        require(subaccount != address(0), "SymmioSolverDepositor: Zero subaccount");
+
+        bytes[] memory calls = new bytes[](1);
+        calls[0] = abi.encodeWithSelector(
+            ISymmio.internalTransfer.selector,
+            solver,
+            amount
+        );
+        multiAccount._call(subaccount, calls);
+
+        currentDeposit += amount;
+        emit DepositFromSymmio(_msgSender(), subaccount, amount);
     }
 
     function requestWithdraw(
@@ -248,6 +272,12 @@ contract OnChainSymmioVaultV2 is
     function setDepositLimit(uint256 _depositLimit) public onlyRole(SETTER_ROLE) {
         depositLimit = _depositLimit;
         emit DepositLimitUpdatedEvent(_depositLimit);
+    }
+
+    function setMultiAccount(address _multiAccount) public onlyRole(SETTER_ROLE) {
+        require(_multiAccount != address(0), "SymmioSolverDepositor: Zero address");
+        multiAccount = IMultiAccount(_multiAccount);
+        emit MultiAccountUpdatedEvent(_multiAccount);
     }
 
     function pause() external onlyRole(PAUSER_ROLE) {

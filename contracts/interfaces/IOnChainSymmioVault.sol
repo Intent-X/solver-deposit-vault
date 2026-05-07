@@ -37,4 +37,6 @@ interface IOnChainSymmioVault {
     event SolverUpdatedEvent(address indexed solver);
     event DepositToSymmio(address indexed depositor, address indexed solver, uint256 amount);
     event SignerUpdatedEvent(address indexed signer);
+    event DepositFromSymmio(address indexed caller, address indexed subaccount, uint256 amount);
+    event MultiAccountUpdatedEvent(address multiAccount);
 }

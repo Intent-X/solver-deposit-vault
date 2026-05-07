@@ -4,10 +4,6 @@
 // For more information, see https://docs.symm.io/legal-disclaimer/license
 pragma solidity ^0.8.19;
 
-interface ISymmio {
-    function getCollateral() external view returns (address);
-
-    function depositFor(address user, uint256 amount) external;
-
-    function internalTransfer(address user, uint256 amount) external;
+interface IMultiAccount {
+    function _call(address account, bytes[] memory _callDatas) external returns (bytes[] memory);
 }
