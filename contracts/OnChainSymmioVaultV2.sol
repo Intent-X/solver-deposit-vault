@@ -52,9 +52,6 @@ contract OnChainSymmioVaultV2 is
     /// @notice Symmio MultiAccount (Arbitrum) used to issue delegated `_call`s on behalf of users.
     IMultiAccount public multiAccount;
 
-    /// @notice The solver's Symmio sub-account whose allocated balance receives internal transfers.
-    address public solverSubAccount;
-
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
         _disableInitializers();
@@ -108,19 +105,19 @@ contract OnChainSymmioVaultV2 is
 
     function depositViaInternalTransfer(address subAccount, uint256 amount) external whenNotPaused nonReentrant {
         require(address(multiAccount) != address(0), "SymmioSolverDepositor: Zero address");
-        require(solverSubAccount != address(0), "SymmioSolverDepositor: Zero address");
+        require(solver != address(0), "SymmioSolverDepositor: Zero address");
         require(amount > 0, "SymmioSolverDepositor: Amount must be greater than 0");
         require(currentDeposit + amount <= depositLimit, "SymmioSolverDepositor: Deposit limit reached");
         require(multiAccount.owners(subAccount) == _msgSender(), "SymmioSolverDepositor: Not subAccount owner");
 
-        uint256 beforeAllocated = symmio.allocatedBalanceOfPartyA(solverSubAccount);
+        uint256 beforeAllocated = symmio.allocatedBalanceOfPartyA(solver);
 
         bytes[] memory calls = new bytes[](1);
-        calls[0] = abi.encodeWithSelector(INTERNAL_TRANSFER_SELECTOR, solverSubAccount, amount);
+        calls[0] = abi.encodeWithSelector(INTERNAL_TRANSFER_SELECTOR, solver, amount);
         multiAccount._call(subAccount, calls);
 
         require(
-            symmio.allocatedBalanceOfPartyA(solverSubAccount) - beforeAllocated == amount,
+            symmio.allocatedBalanceOfPartyA(solver) - beforeAllocated == amount,
             "SymmioSolverDepositor: Allocated balance mismatch"
         );
 
@@ -281,12 +278,6 @@ contract OnChainSymmioVaultV2 is
         require(_multiAccount != address(0), "SymmioSolverDepositor: Zero address");
         multiAccount = IMultiAccount(_multiAccount);
         emit MultiAccountUpdatedEvent(_multiAccount);
-    }
-
-    function setSolverSubAccount(address _solverSubAccount) public onlyRole(SETTER_ROLE) {
-        require(_solverSubAccount != address(0), "SymmioSolverDepositor: Zero address");
-        solverSubAccount = _solverSubAccount;
-        emit SolverSubAccountUpdatedEvent(_solverSubAccount);
     }
 
     function setDepositLimit(uint256 _depositLimit) public onlyRole(SETTER_ROLE) {
