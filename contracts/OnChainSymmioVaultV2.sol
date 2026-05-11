@@ -13,6 +13,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import "./interfaces/IOnChainSymmioVault.sol";
 import "./interfaces/ISymmio.sol";
+import "./interfaces/IMultiAccount.sol";
 
 contract OnChainSymmioVaultV2 is
     IOnChainSymmioVault,
@@ -32,6 +33,8 @@ contract OnChainSymmioVaultV2 is
     bytes32 public constant TYPE_HASH = keccak256(
         "WithdrawRequest(uint256 amount,uint256 minAmountOut,address receiver,uint256 nonce,uint256 deadline)"
     );
+    // selector of IAccountFacet.internalTransfer(address,uint256) on the Symmio Diamond
+    bytes4 public constant INTERNAL_TRANSFER_SELECTOR = bytes4(keccak256("internalTransfer(address,uint256)"));
 
     ISymmio public symmio;
     address public solver;
@@ -45,6 +48,12 @@ contract OnChainSymmioVaultV2 is
     uint256 public withdrawalPeriod;
     mapping(address => uint256) public pendingWithdrawalAmount;
     mapping(address => mapping(uint256 => bool)) public usedNonces;
+
+    /// @notice Symmio MultiAccount (Arbitrum) used to issue delegated `_call`s on behalf of users.
+    IMultiAccount public multiAccount;
+
+    /// @notice The solver's Symmio sub-account whose allocated balance receives internal transfers.
+    address public solverSubAccount;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -95,6 +104,29 @@ contract OnChainSymmioVaultV2 is
         collateralToken.forceApprove(address(symmio), amount);
         symmio.depositFor(solver, amount);
         emit DepositToSymmio(_msgSender(), solver, amount);
+    }
+
+    function depositViaInternalTransfer(address subAccount, uint256 amount) external whenNotPaused nonReentrant {
+        require(address(multiAccount) != address(0), "SymmioSolverDepositor: Zero address");
+        require(solverSubAccount != address(0), "SymmioSolverDepositor: Zero address");
+        require(amount > 0, "SymmioSolverDepositor: Amount must be greater than 0");
+        require(currentDeposit + amount <= depositLimit, "SymmioSolverDepositor: Deposit limit reached");
+        require(multiAccount.owners(subAccount) == _msgSender(), "SymmioSolverDepositor: Not subAccount owner");
+
+        uint256 beforeAllocated = symmio.allocatedBalanceOfPartyA(solverSubAccount);
+
+        bytes[] memory calls = new bytes[](1);
+        calls[0] = abi.encodeWithSelector(INTERNAL_TRANSFER_SELECTOR, solverSubAccount, amount);
+        multiAccount._call(subAccount, calls);
+
+        require(
+            symmio.allocatedBalanceOfPartyA(solverSubAccount) - beforeAllocated == amount,
+            "SymmioSolverDepositor: Allocated balance mismatch"
+        );
+
+        currentDeposit += amount;
+        emit Deposit(_msgSender(), amount);
+        emit DepositViaInternalTransfer(_msgSender(), subAccount, amount);
     }
 
     function requestWithdraw(
@@ -243,6 +275,18 @@ contract OnChainSymmioVaultV2 is
         require(_signer != address(0), "SymmioSolverDepositor: Zero address");
         signer = _signer;
         emit SignerUpdatedEvent(_signer);
+    }
+
+    function setMultiAccount(address _multiAccount) public onlyRole(SETTER_ROLE) {
+        require(_multiAccount != address(0), "SymmioSolverDepositor: Zero address");
+        multiAccount = IMultiAccount(_multiAccount);
+        emit MultiAccountUpdatedEvent(_multiAccount);
+    }
+
+    function setSolverSubAccount(address _solverSubAccount) public onlyRole(SETTER_ROLE) {
+        require(_solverSubAccount != address(0), "SymmioSolverDepositor: Zero address");
+        solverSubAccount = _solverSubAccount;
+        emit SolverSubAccountUpdatedEvent(_solverSubAccount);
     }
 
     function setDepositLimit(uint256 _depositLimit) public onlyRole(SETTER_ROLE) {

@@ -9,6 +9,7 @@ contract MockSymmio {
 
     address public collateral;
     mapping(address => uint256) public balances;
+    mapping(address => uint256) public allocatedBalances;
 
     constructor(address _collateral) {
         collateral = _collateral;
@@ -25,5 +26,15 @@ contract MockSymmio {
 
     function balanceOf(address partyB) external view returns (uint256) {
         return balances[partyB];
+    }
+
+    function allocatedBalanceOfPartyA(address partyA) external view returns (uint256) {
+        return allocatedBalances[partyA];
+    }
+
+    /// @notice Mirrors Symmio's account-layer internalTransfer: the caller is the source
+    /// sub-account; here we just credit the recipient's allocated balance to simulate the credit.
+    function internalTransfer(address user, uint256 amount) external {
+        allocatedBalances[user] += amount;
     }
 }
