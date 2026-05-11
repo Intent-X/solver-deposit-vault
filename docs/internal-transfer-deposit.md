@@ -497,4 +497,118 @@ Hardhat (`npx hardhat test`), against forked Arbitrum or with mocked `IMultiAcco
 5. **`p1-t3` dependency.** The two break-modes in §6 (anti-spoof ERC20-inflow guard; Balancer
    collateral coverage of the allocated bucket) are explicitly punted to `p1-t3` and may feed back
    constraints (e.g. a separate per-path limit) — but none of those would change the contract
-   surface defined here.
+   surface defined here. **Resolved in §10 below.**
+
+---
+
+## 10. Off-chain accounting verification (p1-t3)
+
+**Verdict: the new `depositViaInternalTransfer` path does NOT silently break the off-chain
+accounting.** Neither of the two break-modes from §6 is present in the off-chain code on this
+machine. One small observability nit (not a correctness issue) is noted at the end.
+
+### Repos / files inspected
+
+The off-chain side of this vault lives in two repos (read-only here):
+
+- **`real-time-intentx-indexer`** (`/Users/sergio/IntentX/Intentx-Carbon/real-time-intentx-indexer/`)
+  — Kafka-fed log decoder; persists vault on-chain events to Mongo. It does **not** credit users.
+  - `src/pipeline.ts:83-103` — `vaultLifecycleEventNames` = `{Deposit, DepositToSymmio,
+    WithdrawRequestEvent, WithdrawRequestAcceptedEvent, WithdrawRequestRejected,
+    WithdrawRequestCanceled, WithdrawClaimedEvent}`; `isVaultLifecycleEvent` matches purely by
+    `(contractAddress == vaultAddress) && name ∈ that set` — no ERC20 `Transfer` correlation.
+  - `src/pipeline.ts:415-429` — vault-lifecycle logs are routed straight to
+    `mongoWriter.writeVaultOnchainEvents(events)`.
+  - `src/writers/mongo-writer.ts:1067-1153` — `writeVaultOnchainEvents` just transforms+upserts the
+    decoded event (`account = depositor || sender || receiver`, `amount = eventData.amount`); no
+    cross-check against an ERC20 inflow, no balance reconciliation.
+- **`nox-vault-calculator-backend`** (`/Users/sergio/IntentX/Intentx-Carbon/solver-research/nox-vault-calculator-backend/`)
+  — reads those persisted events from Mongo and projects per-user state (mints/burns LP units).
+  This is the component that actually "credits a user". Identical copy also at
+  `/Users/sergio/IntentX/solver-research/nox-vault-calculator-backend/` (only the dashboard
+  controller differs); the `Intentx-Carbon` copy is the newer commit.
+  - `src/modules/nox-vault/onchain/onchain-symmio-vault-v2.events.ts:8-225` — vault event ABI /
+    topic table. Only `Deposit(address,uint256)` and the withdraw-lifecycle events are decoded;
+    `DepositToSymmio` is decoded but unused; **no ERC20 `Transfer` ABI is involved at all**.
+  - `src/modules/nox-vault/onchain/vault-onchain-to-stream.mapper.ts:13-28` — `case "Deposit"`:
+    emits `{ type: "DEPOSIT", userId: depositor, amount, collateralAmount: amount }` directly from
+    the event payload, gated only by `amount > 0`. `case "DepositToSymmio"` → returns `null`
+    (explicitly "do not treat as LP/user deposit"). There is no path here that requires a matching
+    `Transfer` into the vault, and nothing reads the vault's on-chain ERC20 `balanceOf` or
+    `currentDeposit` to validate the credit.
+  - `src/modules/nox-vault/onchain/vault-onchain-indexing.service.ts:98-105` — `case "DEPOSIT":`
+    → `noxVault.emitDeposit(stream.userId, stream.collateralAmount ?? stream.amount)`.
+  - `src/modules/nox-vault/nox-vault.service.ts:30-36` → `vaultService.deposit(userId, amount)`
+    mints LP. `solverBalance` in `core/Vault.ts` / `core/VaultService.ts` is a *bookkeeping*
+    figure incremented by these `deposit()` calls — it is never reconciled against an on-chain
+    read. `grep` for `balanceOf` / `getCollateral` / `allocatedBalanceOfPartyA` / `reconcil` across
+    `nox-vault-calculator-backend/src` finds only `getCollateralPerLp()` (`= solverBalance /
+    totalLpSupply`, unrelated) and mock-only "solver state" simulation helpers in `VaultService.ts`
+    — no production code reads Symmio balances.
+
+(There is no separate `signer` service in any repo on this machine — the EIP-712 `WithdrawRequest`
+signature consumed by `OnChainSymmioVaultV2.requestWithdraw` is produced elsewhere/not checked out
+here. That is irrelevant to the two break-modes: `requestWithdraw` authorises *withdrawals*, and
+internal-transfer deposits don't touch it. The `BALANCER_PRIVATE_KEY` in
+`nox-vault-calculator-backend/src/contracts/onChainSymmioVaultV2/client.ts` is the *balancer* key
+that submits `acceptWithdrawRequest` / `rejectWithdrawRequest`, not the vault `signer`.)
+
+### Break-mode 1 — anti-spoof / ERC20-inflow guard on the indexer: NOT PRESENT → no change needed
+
+The deposit-credit chain is, end to end:
+
+```
+on-chain  Deposit(depositor, amount)
+  → real-time-intentx-indexer  (pipeline.ts → mongo-writer.ts)  persists the decoded event, no Transfer correlation
+  → nox-vault-calculator-backend  vault-onchain-to-stream.mapper.ts  Deposit → { type: DEPOSIT, userId: depositor, amount }
+  → vault-onchain-indexing.service.ts  DEPOSIT → noxVault.emitDeposit(depositor, amount)
+  → nox-vault.service.ts → VaultService.deposit(userId, amount)  mints LP for `depositor`
+```
+
+Nothing in that chain requires (a) a matching ERC20 `Transfer` into the vault in the same tx, (b)
+a `DepositToSymmio` co-event, or (c) any reconciliation of credited totals against the vault's
+on-chain ERC20 `balanceOf` / `currentDeposit`. So `depositViaInternalTransfer` — which emits the
+same `Deposit(_msgSender(), amount)` with **no ERC20 inflow to the vault** — is credited to the
+caller EOA automatically, exactly like the wallet `deposit()` path. **No indexer change is required
+for crediting to work.**
+
+> Observability nit (not a correctness fix, owner: indexer/carbon team): the new
+> `DepositViaInternalTransfer(address indexed depositor, address indexed subAccount, uint256
+> amount)` event is *not* in the indexer's event tables
+> (`onchain-symmio-vault-v2.events.ts` `EVENT_SIGNATURES` / `onChainSymmioVaultV2EventAbi`, and
+> `pipeline.ts` `vaultLifecycleEventNames` / `mongo-writer.ts` `VAULT_EVENT_NAMES`), so it is
+> currently dropped as an unknown topic. Crediting is unaffected (the co-emitted `Deposit` carries
+> everything needed), but if path attribution / "which sub-account funded this" is wanted in the
+> dashboard, add `DepositViaInternalTransfer(address,address,uint256)` to those tables (decode
+> only — map it to `null` in `vault-onchain-to-stream.mapper.ts` so it does **not** also emit a
+> second `DEPOSIT` stream event and double-credit).
+
+### Break-mode 2 — Balancer "collateral I control" total covering the allocated bucket: N/A (no such figure exists in code)
+
+The on-chain `acceptWithdrawRequest` funds payouts by pulling ERC20 from the balancer's *own EOA*
+(`OnChainSymmioVaultV2.acceptWithdrawRequest` → `IERC20(collateralTokenAddress).safeTransferFrom(_msgSender(),
+address(this), providedAmount)` — `contracts/OnChainSymmioVaultV2.sol:193`), and the off-chain
+auto-accept just mirrors the requested amount (`withdrawal-auto-accept.service.ts:101-105`:
+`providedAmount = req.requestedAmount`, `acceptedAmounts = [req.requestedAmount]`). There is **no
+"collateral I control" / "vault backing" figure in the off-chain code on this machine** that reads
+the solver's Symmio balances at all — not the legacy `solver` *available* bucket and not the new
+`solverSubAccount` *allocated* bucket. So there is nothing to "extend to include the allocated
+bucket": the figure doesn't exist to under-count. The only consequence of the new path is the one
+already stated in §6.2 — the vault's local ERC20 balance no longer scales with `currentDeposit`,
+which is a quantitative shift in balancer ops (the balancer must keep enough ERC20 in its wallet),
+not a code bug.
+
+**Recommendation (owner: balancer-ops / monitoring, NOT a blocker for `p1-t2`):** if/when a
+"vault backing coverage" monitor or dashboard figure is built, its "collateral backing
+`currentDeposit`" total must be
+`vaultERC20.balanceOf(vault) + symmio.getCollateral-deposited-for(solver) + symmio.allocatedBalanceOfPartyA(solverSubAccount)`
+(the third term is the new bucket). Until such a monitor exists there is no code to change; this is
+a runbook item, consistent with §6.2's note that "it should be in the Balancer runbook".
+
+### Bottom line for `p1-t2` / `p1-t3`
+
+No off-chain code change is required for the internal-transfer deposit path to credit users
+correctly or for the balancer to settle their withdrawals. The two follow-ups above
+(`DepositViaInternalTransfer` decoding for observability; a "vault backing coverage" monitor that
+includes `allocatedBalanceOfPartyA(solverSubAccount)`) are optional hardening for the indexer and
+balancer-ops teams respectively, neither blocking nor changing the contract surface in §3–§5.
