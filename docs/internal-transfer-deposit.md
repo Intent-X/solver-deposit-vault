@@ -146,7 +146,7 @@ interface IMultiAccount {
 ```
 
 - `owners(subAccount)` returns the EOA that owns that MultiAccount sub-account. Used for the
-  authorisation check (step 1 of the flow).
+  authorisation check (step 2 of the flow).
 - `_call(account, callDatas)` forwards each `callData` to the sub-account, which relays it to the
   Symmio Diamond with the sub-account as the on-chain caller. It is gated upstream by
   `delegatedAccesses[account][msg.sender][selector] == true`. We always pass a length-1 array.
@@ -209,7 +209,7 @@ event DepositViaInternalTransfer(address indexed depositor, address indexed subA
 ```
 
 > `initialize()` does NOT need to set `multiAccount` / `solverSubAccount` — they default to
-> `address(0)`, and `depositViaInternalTransfer` reverts while either is zero (step 2). They are
+> `address(0)`, and `depositViaInternalTransfer` reverts while either is zero (step 1). They are
 > configured post-deploy via the setters above. Adding them as `initialize` params is acceptable
 > but not required; if added, keep the existing params in place and append the new ones (same
 > upgrade-safety reasoning), and keep them optional in the deployment script.
@@ -241,22 +241,27 @@ on Symmio at call time, or the Symmio-side `internalTransfer` reverts (revert ta
 
 `external whenNotPaused nonReentrant` (same modifiers as `deposit()`).
 
-The exact body, in order:
+The exact body, in order. (Implementation note: the config/zero-address guards run **before** the
+owner check — `multiAccount.owners(subAccount)` would itself revert if `multiAccount` were the zero
+address, so the `address(multiAccount) != 0` and `solverSubAccount != 0` requires must come first.
+The set of checks is what matters, not the within-block ordering; the code in
+`contracts/OnChainSymmioVaultV2.sol` orders them: `multiAccount != 0`, `solverSubAccount != 0`,
+`amount > 0`, `currentDeposit + amount <= depositLimit`, then the owner check.)
 
-1. **Owner check.**
+1. **Config + amount guards.**
+   - `require(address(multiAccount) != address(0), "SymmioSolverDepositor: Zero address");`
+   - `require(solverSubAccount != address(0), "SymmioSolverDepositor: Zero address");`
+   - `require(amount > 0, "SymmioSolverDepositor: Amount must be greater than 0");`
+   - `require(currentDeposit + amount <= depositLimit, "SymmioSolverDepositor: Deposit limit reached");`
+   (The `amount > 0` and deposit-limit messages reuse the exact strings from `deposit()` for
+   indexer/UX consistency.)
+
+2. **Owner check.**
    `require(multiAccount.owners(subAccount) == _msgSender(), "SymmioSolverDepositor: Not subAccount owner");`
    — without this, anyone could call `depositViaInternalTransfer(subAccount, amount)` once a
    delegation exists and move that user's funds / steal the `depositor` attribution in the event.
    The upstream `delegateAccess` gate proves the *delegation* was authorised by the owner; this
    vault-side check additionally proves the *caller* is that owner. Cheap (one external view).
-
-2. **Config + amount guards.**
-   - `require(amount > 0, "SymmioSolverDepositor: Amount must be greater than 0");`
-   - `require(currentDeposit + amount <= depositLimit, "SymmioSolverDepositor: Deposit limit reached");`
-   - `require(solverSubAccount != address(0), "SymmioSolverDepositor: Zero address");`
-   - `require(address(multiAccount) != address(0), "SymmioSolverDepositor: Zero address");`
-   (The `amount > 0` and deposit-limit messages reuse the exact strings from `deposit()` for
-   indexer/UX consistency.)
 
 3. **Snapshot the destination's allocated balance.**
    `uint256 oldAllocated = symmio.allocatedBalanceOfPartyA(solverSubAccount);`
@@ -315,9 +320,9 @@ RUNTIME (per deposit):
   User EOA
     │ depositViaInternalTransfer(subAccount, amount)
     ▼
-  Vault  (1) require multiAccount.owners(subAccount) == msg.sender
-         (2) require amount>0; currentDeposit+amount<=depositLimit;
-                     solverSubAccount!=0; multiAccount!=0
+  Vault  (1) require multiAccount!=0; solverSubAccount!=0;
+                     amount>0; currentDeposit+amount<=depositLimit
+         (2) require multiAccount.owners(subAccount) == msg.sender
          (3) oldAllocated = symmio.allocatedBalanceOfPartyA(solverSubAccount)
          (4) multiAccount._call(subAccount, [internalTransfer(solverSubAccount, amount)])
     ▼
@@ -379,7 +384,7 @@ event-driven crediting and out-of-band Balancer funding.
 
 ## 7. Attack surface
 
-- **Caller impersonation / `depositor` spoofing.** Mitigated by step 1 (`owners(subAccount) ==
+- **Caller impersonation / `depositor` spoofing.** Mitigated by step 2 (`owners(subAccount) ==
   _msgSender()`). Without it, any address could trigger a deposit from any sub-account that has an
   outstanding delegation to the vault, and the `Deposit` event would carry the attacker's address
   as `depositor` (so the indexer would credit the wrong user) — and a griefer could force a user's
@@ -394,9 +399,9 @@ event-driven crediting and out-of-band Balancer funding.
 - **Stale delegation.** A user who proposed-to-revoke but hasn't completed `revokeAccesses` on
   MultiAccount still has `delegatedAccesses == true`, so a deposit can still go through. This is
   upstream behaviour; the vault surfaces the upstream revert verbatim once the revoke actually
-  lands. Combined with step 1 (only the owner can call), the only "victim" of a still-live
+  lands. Combined with step 2 (only the owner can call), the only "victim" of a still-live
   delegation is the owner themselves calling intentionally. Documented, no vault mitigation.
-- **Misconfigured `solverSubAccount` / `multiAccount`.** Zero-address is checked (step 2). A
+- **Misconfigured `solverSubAccount` / `multiAccount`.** Zero-address is checked (step 1). A
   wrong-but-nonzero `solverSubAccount` would route funds to the wrong allocated bucket — same
   trust assumption as the existing `solver` setter; both are `SETTER_ROLE`-gated and event-emitting,
   so a misconfiguration is detectable on-chain.
@@ -419,11 +424,11 @@ try/catch — MultiAccount and Symmio reverts bubble up verbatim.
 | # | Condition | Origin |
 |---|-----------|--------|
 | V1 | Vault paused | `whenNotPaused` modifier |
-| V2 | `_msgSender() != multiAccount.owners(subAccount)` | `require(..., "SymmioSolverDepositor: Not subAccount owner")` (step 1) |
-| V3 | `amount == 0` | `require(..., "SymmioSolverDepositor: Amount must be greater than 0")` (step 2; same string as `deposit()`) |
-| V4 | `currentDeposit + amount > depositLimit` | `require(..., "SymmioSolverDepositor: Deposit limit reached")` (step 2; same string as `deposit()`) |
-| V5 | `solverSubAccount == address(0)` | `require(..., "SymmioSolverDepositor: Zero address")` (step 2) |
-| V6 | `multiAccount == address(0)` | `require(..., "SymmioSolverDepositor: Zero address")` (step 2) |
+| V2 | `multiAccount == address(0)` | `require(..., "SymmioSolverDepositor: Zero address")` (step 1) |
+| V3 | `solverSubAccount == address(0)` | `require(..., "SymmioSolverDepositor: Zero address")` (step 1) |
+| V4 | `amount == 0` | `require(..., "SymmioSolverDepositor: Amount must be greater than 0")` (step 1; same string as `deposit()`) |
+| V5 | `currentDeposit + amount > depositLimit` | `require(..., "SymmioSolverDepositor: Deposit limit reached")` (step 1; same string as `deposit()`) |
+| V6 | `_msgSender() != multiAccount.owners(subAccount)` | `require(..., "SymmioSolverDepositor: Not subAccount owner")` (step 2) |
 | V7 | `newAllocated - oldAllocated != amount` (or underflow) | `require(..., "SymmioSolverDepositor: Allocated balance mismatch")` (step 5) |
 | V8 | Reentrant call | `nonReentrant` modifier |
 
