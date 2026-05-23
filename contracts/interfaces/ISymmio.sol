@@ -5,7 +5,7 @@
 pragma solidity ^0.8.19;
 
 interface ISymmio {
-    function getCollateral() external view returns (address);
+	function getCollateral() external view returns (address);
 
-    function depositFor(address user, uint256 amount) external;
+	function depositFor(address user, uint256 amount) external;
 }

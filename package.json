@@ -1,28 +1,41 @@
 {
-  "name": "solver-deposit-vaults",
-  "version": "1.0.0",
-  "description": "",
-  "main": "hardhat.config.ts",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "MIT",
-  "devDependencies": {
-    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
-    "@openzeppelin/contracts": "^4.9.3",
-    "@openzeppelin/contracts-upgradeable": "^4.9.3",
-    "@openzeppelin/hardhat-upgrades": "^3.9.1",
-    "@types/chai": "^4.3.14",
-    "@types/mocha": "^10.0.6",
-    "@types/node": "^20.11.30",
-    "chai": "^4.2.0",
-    "dotenv": "^16.4.5",
-    "ethers": "^6.11.1",
-    "hardhat": "^2.26.3",
-    "ts-node": "^10.9.2",
-    "typechain": "^8.3.2",
-    "typescript": "^5.4.3"
-  }
+	"name": "solver-deposit-vaults",
+	"version": "1.0.0",
+	"description": "",
+	"main": "hardhat.config.ts",
+	"type": "module",
+	"scripts": {
+		"compile": "hardhat compile",
+		"prettier:contracts": "prettier --write \"contracts/**/*.sol\"",
+		"prettier:contracts:check": "prettier --check \"contracts/**/*.sol\"",
+		"prettier:ts": "prettier --write \"**/*.ts\"",
+		"prettier:ts:check": "prettier --check \"**/*.ts\"",
+		"test": "hardhat test",
+		"typechain": "hardhat compile --force"
+	},
+	"keywords": [],
+	"author": "",
+	"license": "MIT",
+	"devDependencies": {
+		"@nomicfoundation/hardhat-ethers": "^4.0.3",
+		"@nomicfoundation/hardhat-toolbox-mocha-ethers": "^3.0.2",
+		"@nomicfoundation/hardhat-verify": "^3.0.8",
+		"@openzeppelin/contracts": "^4.9.6",
+		"@openzeppelin/contracts-upgradeable": "^4.9.6",
+		"@trivago/prettier-plugin-sort-imports": "6.0.0",
+		"@typechain/ethers-v6": "^0.5.1",
+		"@types/chai": "^5.2.3",
+		"@types/mocha": "^10.0.7",
+		"@types/node": "^20.14.12",
+		"chai": "^5.1.2",
+		"dotenv": "^16.4.5",
+		"ethers": "^6.13.1",
+		"hardhat": "^3.1.0",
+		"mocha": "^11.0.0",
+		"prettier": "3.8.0",
+		"prettier-plugin-solidity": "2.2.0",
+		"ts-node": "^10.9.2",
+		"typechain": "^8.3.2",
+		"typescript": "^5.5.4"
+	}
 }
