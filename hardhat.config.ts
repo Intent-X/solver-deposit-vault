@@ -1,62 +1,10 @@
-import { HardhatUserConfig } from "hardhat/config";
-import "@nomicfoundation/hardhat-toolbox";
-import "@openzeppelin/hardhat-upgrades";
-import { ethers } from "ethers";
-import { resolve } from "path";
+import { configVariable, defineConfig } from "hardhat/config";
+import hardhatToolboxMochaEthers from "@nomicfoundation/hardhat-toolbox-mocha-ethers";
+import hardhatVerify from "@nomicfoundation/hardhat-verify";
+import hardhatUpgrades from "@openzeppelin/hardhat-upgrades";
 
-import { config as dotenvConfig } from "dotenv";
-
-const dotenvConfigPath: string = process.env.DOTENV_CONFIG_PATH || "./.env";
-dotenvConfig({ path: resolve(__dirname, dotenvConfigPath) });
-
-// Ensure that we have all the environment variables we need.
-const privateKey: string | undefined = process.env.PRIVATE_KEY;
-if (!privateKey) throw new Error("Please set your PRIVATE_KEY in a .env file");
-const wallet = new ethers.Wallet(privateKey);
-if (wallet.address !== "0xf1d63df1CD64a3f3A8F440bAba619dbB4baBB020")
-  console.warn(
-    `Using wallet ${wallet.address} instead of original 0xf1d63df1CD64a3f3A8F440bAba619dbB4baBB020`
-  );
-const baseApiKey: string = process.env.BASE_API_KEY || "";
-
-const config: HardhatUserConfig = {
-  defaultNetwork: "hardhat",
-  gasReporter: {
-    currency: "USD",
-    enabled: true,
-    excludeContracts: [],
-    src: "./contracts",
-  },
-  networks: {
-    hardhat: {
-      allowUnlimitedContractSize: false,
-    },
-    base: {
-      url: "https://1rpc.io/base",
-      accounts: [privateKey || `0x0`],
-    },
-  },
-  etherscan: {
-    apiKey: {
-      base: baseApiKey,
-    },
-    customChains: [
-      {
-        network: "base",
-        chainId: 8453,
-        urls: {
-          apiURL: `https://api.basescan.org/api?apiKey=${baseApiKey}`,
-          browserURL: "https://basescan.org",
-        },
-      },
-    ],
-  },
-  paths: {
-    artifacts: "./artifacts",
-    cache: "./cache",
-    sources: "./contracts",
-    tests: "./test",
-  },
+export default defineConfig({
+  plugins: [hardhatToolboxMochaEthers, hardhatVerify, hardhatUpgrades],
   solidity: {
     version: "0.8.28",
     settings: {
@@ -71,6 +19,24 @@ const config: HardhatUserConfig = {
       viaIR: true,
     },
   },
-};
-
-export default config;
+  networks: {
+    // In-process EVM used for `hardhat test` and `hardhat run` without --network.
+    hardhat: {
+      type: "edr-simulated",
+      chainType: "l1",
+    },
+    base: {
+      type: "http",
+      chainType: "l1",
+      url: "https://1rpc.io/base",
+      accounts: [configVariable("PRIVATE_KEY")],
+    },
+  },
+  // hardhat-verify v3 uses Etherscan's unified (V2) multichain API; a single
+  // Etherscan API key works for Base. Set ETHERSCAN_API_KEY in your env.
+  verify: {
+    etherscan: {
+      apiKey: configVariable("ETHERSCAN_API_KEY"),
+    },
+  },
+});

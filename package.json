@@ -2,27 +2,29 @@
   "name": "solver-deposit-vaults",
   "version": "1.0.0",
   "description": "",
+  "type": "module",
   "main": "hardhat.config.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "compile": "hardhat compile",
+    "test": "hardhat test",
+    "scenario": "hardhat run scripts/scenario.ts"
   },
   "keywords": [],
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
-    "@openzeppelin/contracts": "^5.4.0",
-    "@openzeppelin/contracts-upgradeable": "^5.4.0",
-    "@openzeppelin/hardhat-upgrades": "^3.9.1",
-    "@types/chai": "^4.3.14",
+    "@nomicfoundation/hardhat-ethers": "^4.0.0",
+    "@nomicfoundation/hardhat-toolbox-mocha-ethers": "^3.0.7",
+    "@nomicfoundation/hardhat-verify": "^3.0.10",
+    "@openzeppelin/contracts": "5.4.0",
+    "@openzeppelin/contracts-upgradeable": "5.4.0",
+    "@openzeppelin/hardhat-upgrades": "^4.0.1",
     "@types/mocha": "^10.0.6",
-    "@types/node": "^20.11.30",
-    "chai": "^4.2.0",
-    "dotenv": "^16.4.5",
-    "ethers": "^6.11.1",
-    "hardhat": "^2.26.3",
-    "ts-node": "^10.9.2",
-    "typechain": "^8.3.2",
+    "@types/node": "^22.0.0",
+    "chai": "^5.2.0",
+    "ethers": "^6.16.0",
+    "hardhat": "^3.8.0",
+    "mocha": "^11.0.0",
     "typescript": "^5.4.3"
   }
 }

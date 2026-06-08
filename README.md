@@ -1,39 +1,46 @@
-# Symmio Solver Vaults
+# Solver Deposit Vault
 
-## Overview
+Upgradeable custody vault (`SolverVault`) where users deposit collateral, request
+signature-gated withdrawals, and a rebalancer moves idle funds to whitelisted
+treasuries. Built with **Hardhat 3** + ethers v6 + OpenZeppelin upgradeable proxies.
 
-This contract enables users to provide liquidity for a Hedger (solver) on the Symmio platform. When users deposit funds,
-the contract issues vault tokens in a 1:1 ratio with the deposited amount. Users can stake these vault tokens in another
-contract to earn returns. They also have the option to withdraw their funds anytime by returning their vault tokens.
+## Roles
 
-The contract includes a 'minimumPaybackRatio' property, which specifies the minimum ratio of funds that users are
-guaranteed to receive upon withdrawal. If a user requests a withdrawal, the Balancer has the capability to add extra
-funds to the contract and approve the withdrawal request at a ratio exceeding the minimum required. Once the Balancer
-accepts a withdrawal request, the approved amount is locked in the contract and cannot be transferred to Symmio
-thereafter. This amount is reserved exclusively for users, who can then claim the amount that has been approved for
-them.
+- **Executor** – accepts or rejects pending withdrawal requests.
+- **Setter** – manages roles and the withdrawal whitelist.
+- **Rebalancer** – moves funds from the vault to whitelisted addresses.
+- **Signer** – signs (EIP-712) the message a user needs to request a withdrawal.
 
-Additionally, there's a deposit limit in place. This limit caps the total amount users can put into the contract. The
-management of this limit is handled by the 'currentDeposit' variable.
-
-## Contract Roles
-
-- **Depositor Role:** Allowed to move funds to the symmio contract.
-- **Balancer Role:** Can deposit funds into the contract to facilitate user withdrawals.
-- **Setter Role:** Authorized to update contract settings.
-- **Pauser and Unpauser Roles:** Manage the pausing and unpausing of the contract.
-
-## Main Functions
-
-- **deposit:** Allows users to deposit funds and receive vault tokens.
-- **depositToSymmio:** Permits the Depositor role to deposit funds into Symmio on behalf of the solver.
-- **requestWithdraw:** Users can request to withdraw funds, returning their vault tokens.
-- **acceptWithdrawRequest:** The Balancer role can accept withdrawal requests, ensuring the payback ratio meets the
-  minimum threshold.
-- **claimForWithdrawRequest:** Users can claim their funds after their withdrawal request is accepted.
-
-Use the following command for running tests:
+## Setup
 
 ```shell
-npx hardhat test
+npm install
+```
+
+## Run the full scenario
+
+Deploys a mock collateral token and the vault on a throwaway in-process Hardhat
+network, then walks the whole lifecycle (deposits → withdrawal accepted / rejected
+/ canceled → treasury rebalance → pause/unpause) with `[PASS]` assertions at each
+step. No `.env`, private key, or separate node required:
+
+```shell
+npm run scenario
+# or: npx hardhat run scripts/scenario.ts
+```
+
+## Other commands
+
+```shell
+npm test            # run the unit test suite (npx hardhat test)
+npm run compile     # compile contracts + generate types (npx hardhat compile)
+```
+
+## Deploy / configure (real networks)
+
+These need env vars and a `--network` (see `hardhat.config.ts`):
+
+```shell
+COLLATERAL_TOKEN=0x... npx hardhat run scripts/deploy.ts --network base
+VAULT_ADDRESS=0x... npx hardhat run scripts/configure.ts --network base
 ```

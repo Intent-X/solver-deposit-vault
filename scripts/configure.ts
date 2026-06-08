@@ -1,8 +1,10 @@
-import { ethers } from "hardhat";
+import hre from "hardhat";
 
 async function main() {
-  const [deployer] = await ethers.getSigners();
+  const connection = await hre.network.getOrCreate();
+  const { ethers } = connection;
 
+  const [deployer] = await ethers.getSigners();
   console.log("Configuring SolverVault with the account:", deployer.address);
 
   const VAULT_ADDRESS = process.env.VAULT_ADDRESS;
@@ -45,7 +47,7 @@ async function main() {
     }
   }
 
-  console.log("✅ Configuration complete");
+  console.log("Configuration complete");
 }
 
 main()

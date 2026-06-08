@@ -1,7 +1,17 @@
+import { upgrades } from "@openzeppelin/hardhat-upgrades";
 import { expect } from "chai";
 import { Signer, ZeroAddress } from "ethers";
-import { ethers, upgrades } from "hardhat";
-import { MockERC20, SolverVault } from "../typechain-types";
+import hre from "hardhat";
+import type {
+  MockERC20,
+  SolverVault,
+} from "../types/ethers-contracts/index.js";
+
+// Hardhat 3: network connections are explicit and the `ethers` object lives on
+// the connection. Create it once and share it across the whole suite.
+const connection = await hre.network.getOrCreate();
+const { ethers } = connection;
+const upgradesApi = await upgrades(hre, connection);
 
 function decimal(n: number, decimals: bigint = 18n): bigint {
   return BigInt(n) * 10n ** decimals;
@@ -92,15 +102,15 @@ describe("SolverVault", function () {
     const MockERC20 = await ethers.getContractFactory("MockERC20");
     collateralToken = (await MockERC20.connect(owner).deploy(
       collateralDecimals
-    )) as any;
+    )) as unknown as MockERC20;
     await collateralToken.waitForDeployment();
 
     const SolverVault = await ethers.getContractFactory("SolverVault");
-    vault = (await upgrades.deployProxy(
+    vault = (await upgradesApi.deployProxy(
       SolverVault,
       [await owner.getAddress(), await collateralToken.getAddress()],
       { initializer: "initialize" }
-    )) as any;
+    )) as unknown as SolverVault;
 
     EXECUTOR_ROLE = await vault.EXECUTOR_ROLE();
     SETTER_ROLE = await vault.SETTER_ROLE();
@@ -134,7 +144,7 @@ describe("SolverVault", function () {
           await owner.getAddress(),
           await collateralToken.getAddress()
         )
-      ).to.be.reverted;
+      ).to.be.revert(ethers);
     });
 
     it("should let the setter manage roles", async function () {
@@ -174,7 +184,9 @@ describe("SolverVault", function () {
 
     it("should fail when paused", async function () {
       await vault.connect(setter).pause();
-      await expect(vault.connect(user).deposit(depositAmount)).to.be.reverted;
+      await expect(vault.connect(user).deposit(depositAmount)).to.be.revert(
+        ethers
+      );
     });
   });
 
@@ -345,8 +357,9 @@ describe("SolverVault", function () {
       await collateralToken
         .connect(owner)
         .mint(await vault.getAddress(), amount);
-      await expect(vault.connect(other).acceptWithdrawRequest(0)).to.be
-        .reverted;
+      await expect(vault.connect(other).acceptWithdrawRequest(0)).to.be.revert(
+        ethers
+      );
     });
 
     it("should fail to accept an invalid id", async function () {
@@ -442,7 +455,7 @@ describe("SolverVault", function () {
         vault
           .connect(other)
           .rebalance([await whitelisted.getAddress()], [amount])
-      ).to.be.reverted;
+      ).to.be.revert(ethers);
     });
   });
 
@@ -468,7 +481,7 @@ describe("SolverVault", function () {
     it("should fail when called by non-setter", async function () {
       await expect(
         vault.connect(other).setWhitelist(await whitelisted.getAddress(), true)
-      ).to.be.reverted;
+      ).to.be.revert(ethers);
     });
   });
 
@@ -481,7 +494,7 @@ describe("SolverVault", function () {
     });
 
     it("should fail to pause by non-setter", async function () {
-      await expect(vault.connect(other).pause()).to.be.reverted;
+      await expect(vault.connect(other).pause()).to.be.revert(ethers);
     });
   });
 });

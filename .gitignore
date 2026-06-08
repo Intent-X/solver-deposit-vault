@@ -12,3 +12,4 @@ out
 pnpm-lock.yaml
 .idea
 yarn.lock
+types
