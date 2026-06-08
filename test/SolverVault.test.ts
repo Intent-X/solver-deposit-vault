@@ -1,590 +1,487 @@
 import { expect } from "chai";
 import { Signer, ZeroAddress } from "ethers";
-import hre, { ethers, upgrades } from "hardhat";
-import {
-  MockERC20,
-  OnChainSymmioVault,
-  SymmioVaultLpToken,
-} from "../typechain-types";
-import { time } from "@nomicfoundation/hardhat-network-helpers";
+import { ethers, upgrades } from "hardhat";
+import { MockERC20, SolverVault } from "../typechain-types";
 
-function decimal(n: number, decimal: bigint = 18n): bigint {
-  return BigInt(n) * 10n ** decimal;
+function decimal(n: number, decimals: bigint = 18n): bigint {
+  return BigInt(n) * 10n ** decimals;
 }
 
 enum RequestStatus {
   Pending,
-  Ready,
-  Done,
+  Accepted,
+  Rejected,
   Canceled,
 }
 
-describe("SymmioSolverDepositor", function () {
-  let symmioDepositor: OnChainSymmioVault,
-    collateralToken: any,
-    collateralToken2: any,
-    symmio: any,
-    symmioWithDifferentCollateral: any,
-    lpToken: MockERC20;
+describe("SolverVault", function () {
+  let vault: SolverVault;
+  let collateralToken: MockERC20;
   let owner: Signer,
     user: Signer,
-    depositorUser: Signer,
-    balancer: Signer,
-    receiver: Signer,
+    executor: Signer,
+    rebalancer: Signer,
+    signer: Signer,
     setter: Signer,
-    pauser: Signer,
-    unpauser: Signer,
-    solver: Signer,
+    receiver: Signer,
+    whitelisted: Signer,
     other: Signer;
-  let collateralDecimals = 6n;
-  let DEPOSITOR_ROLE,
-    BALANCER_ROLE,
-    MINTER_ROLE,
-    PAUSER_ROLE,
-    UNPAUSER_ROLE,
-    SETTER_ROLE;
-  const depositLimit = decimal(100000);
 
-  async function mintFor(signer: Signer, amount: BigInt) {
-    await collateralToken.connect(owner).mint(signer.getAddress(), amount);
-    await collateralToken
-      .connect(signer)
-      .approve(await symmioDepositor.getAddress(), amount);
+  let EXECUTOR_ROLE: string,
+    SETTER_ROLE: string,
+    REBALANCER_ROLE: string,
+    SIGNER_ROLE: string;
+
+  const collateralDecimals = 6n;
+
+  async function mintFor(s: Signer, amount: bigint) {
+    await collateralToken.connect(owner).mint(await s.getAddress(), amount);
+    await collateralToken.connect(s).approve(await vault.getAddress(), amount);
+  }
+
+  async function signWithdraw(
+    sig: Signer,
+    user: string,
+    amount: bigint,
+    receiver: string,
+    nonce: bigint,
+    deadline: bigint
+  ): Promise<string> {
+    const domain = {
+      name: "SolverVault",
+      version: "1",
+      chainId: (await ethers.provider.getNetwork()).chainId,
+      verifyingContract: await vault.getAddress(),
+    };
+    const types = {
+      WithdrawRequest: [
+        { name: "user", type: "address" },
+        { name: "amount", type: "uint256" },
+        { name: "receiver", type: "address" },
+        { name: "nonce", type: "uint256" },
+        { name: "deadline", type: "uint256" },
+      ],
+    };
+    return sig.signTypedData(domain, types, {
+      user,
+      amount,
+      receiver,
+      nonce,
+      deadline,
+    });
+  }
+
+  async function futureDeadline(): Promise<bigint> {
+    const block = await ethers.provider.getBlock("latest");
+    return BigInt(block!.timestamp) + 3600n;
   }
 
   beforeEach(async function () {
     [
       owner,
       user,
-      depositorUser,
-      balancer,
-      receiver,
+      executor,
+      rebalancer,
+      signer,
       setter,
-      pauser,
-      unpauser,
-      solver,
+      receiver,
+      whitelisted,
       other,
     ] = await ethers.getSigners();
 
-    const SymmioSolverDepositor = await ethers.getContractFactory(
-      "OnChainSymmioVault"
-    );
     const MockERC20 = await ethers.getContractFactory("MockERC20");
-    const Symmio = await ethers.getContractFactory("MockSymmio");
-
-    collateralToken = await MockERC20.connect(owner).deploy(collateralDecimals);
+    collateralToken = (await MockERC20.connect(owner).deploy(
+      collateralDecimals
+    )) as any;
     await collateralToken.waitForDeployment();
 
-    collateralToken2 = await MockERC20.connect(owner).deploy(
-      collateralDecimals + 1n
-    );
-    await collateralToken2.waitForDeployment();
+    const SolverVault = await ethers.getContractFactory("SolverVault");
+    vault = (await upgrades.deployProxy(
+      SolverVault,
+      [await owner.getAddress(), await collateralToken.getAddress()],
+      { initializer: "initialize" }
+    )) as any;
 
-    symmio = await Symmio.deploy(await collateralToken.getAddress());
-    await symmio.waitForDeployment();
+    EXECUTOR_ROLE = await vault.EXECUTOR_ROLE();
+    SETTER_ROLE = await vault.SETTER_ROLE();
+    REBALANCER_ROLE = await vault.REBALANCER_ROLE();
+    SIGNER_ROLE = await vault.SIGNER_ROLE();
 
-    lpToken = await MockERC20.deploy(collateralDecimals);
-    await lpToken.waitForDeployment();
-
-    symmioWithDifferentCollateral = await Symmio.deploy(
-      await lpToken.getAddress()
-    );
-    await symmioWithDifferentCollateral.waitForDeployment();
-
-    symmioDepositor = (await upgrades.deployProxy(SymmioSolverDepositor, [
-      await symmio.getAddress(),
-      await lpToken.getAddress(),
-      await solver.getAddress(),
-      500000000000000000n, // 0.5,
-      depositLimit,
-      depositLimit,
-    ])) as any;
-
-    BALANCER_ROLE = await symmioDepositor.BALANCER_ROLE();
-    SETTER_ROLE = await symmioDepositor.SETTER_ROLE();
-    PAUSER_ROLE = await symmioDepositor.PAUSER_ROLE();
-    UNPAUSER_ROLE = await symmioDepositor.UNPAUSER_ROLE();
-    BALANCER_ROLE = await symmioDepositor.BALANCER_ROLE();
-    MINTER_ROLE = await lpToken.MINTER_ROLE();
-
-    await symmioDepositor
+    await vault.connect(owner).grantRole(EXECUTOR_ROLE, executor.getAddress());
+    await vault
       .connect(owner)
-      .grantRole(BALANCER_ROLE, balancer.getAddress());
-    await symmioDepositor
-      .connect(owner)
-      .grantRole(SETTER_ROLE, setter.getAddress());
-    await symmioDepositor
-      .connect(owner)
-      .grantRole(PAUSER_ROLE, pauser.getAddress());
-    await symmioDepositor
-      .connect(owner)
-      .grantRole(UNPAUSER_ROLE, unpauser.getAddress());
-    await lpToken
-      .connect(owner)
-      .grantRole(MINTER_ROLE, symmioDepositor.getAddress());
+      .grantRole(REBALANCER_ROLE, rebalancer.getAddress());
+    await vault.connect(owner).grantRole(SIGNER_ROLE, signer.getAddress());
+    await vault.connect(owner).grantRole(SETTER_ROLE, setter.getAddress());
   });
 
   describe("initialize", function () {
-    it("should revert if initialize second time", async () => {
+    it("should set initial values correctly", async function () {
+      expect(await vault.collateralToken()).to.equal(
+        await collateralToken.getAddress()
+      );
+      expect(await vault.totalDeposited()).to.equal(0);
+      expect(await vault.totalWithdrawn()).to.equal(0);
+      expect(await vault.pendingToWithdraw()).to.equal(0);
+      expect(
+        await vault.hasRole(SETTER_ROLE, await owner.getAddress())
+      ).to.equal(true);
+    });
+
+    it("should revert if initialized again", async function () {
       await expect(
-        symmioDepositor.initialize(
-          await symmio.getAddress(),
-          await lpToken.getAddress(),
-          await solver.getAddress(),
-          500000000000000000n, // 0.5,
-          depositLimit,
-          depositLimit
+        vault.initialize(
+          await owner.getAddress(),
+          await collateralToken.getAddress()
         )
       ).to.be.reverted;
     });
-    it("should set initial values correctly", async function () {
-      expect(await symmioDepositor.symmio()).to.equal(
-        await symmio.getAddress()
-      );
-      expect(await symmioDepositor.lpTokenAddress()).to.equal(
-        await lpToken.getAddress()
-      );
-    });
 
-    it("Should fail to update collateral", async () => {
-      await expect(
-        symmioDepositor
-          .connect(owner)
-          .setSymmioAddress(await symmioWithDifferentCollateral.getAddress())
-      ).to.be.revertedWith(
-        "SymmioSolverDepositor: Collateral can not be changed"
-      );
-    });
-
-    it("Should fail to set invalid solver", async () => {
-      await expect(
-        symmioDepositor.connect(owner).setSolver(ZeroAddress)
-      ).to.be.revertedWith("SymmioSolverDepositor: Zero address");
-      await expect(
-        symmioDepositor.connect(other).setSolver(await solver.getAddress())
-      ).to.be.reverted;
-    });
-
-    it("Should fail to set symmioAddress", async () => {
-      await expect(
-        symmioDepositor.connect(owner).setSymmioAddress(ZeroAddress)
-      ).to.be.revertedWith("SymmioSolverDepositor: Zero address");
-      await expect(
-        symmioDepositor
-          .connect(other)
-          .setSymmioAddress(await solver.getAddress())
-      ).to.be.reverted;
-    });
-
-    it("Should fail to change collateral", async () => {
-      await expect(
-        symmioDepositor
-          .connect(setter)
-          .setSymmioAddress(await symmioWithDifferentCollateral.getAddress())
-      ).to.be.revertedWith(
-        "SymmioSolverDepositor: Collateral can not be changed"
-      );
-    });
-
-    it("Should pause/unpause with given roles", async () => {
-      await symmioDepositor.connect(pauser).pause();
-      await symmioDepositor.connect(unpauser).unpause();
-      await expect(symmioDepositor.connect(other).pause()).to.be.reverted;
-      await expect(symmioDepositor.connect(other).unpause()).to.be.reverted;
-    });
-
-    it("Should update deposit limit", async () => {
-      await symmioDepositor.connect(setter).setDepositLimit(1000, 1000);
-      await expect(symmioDepositor.connect(other).setDepositLimit(1000, 1000))
-        .to.be.reverted;
-    });
-
-    it("Should update withdrawalPeriod", async () => {
-      expect(await symmioDepositor.withdrawalPeriod()).to.be.eq(604800);
-      await expect(
-        symmioDepositor.connect(setter).setWithdrawalPeriod(60)
-      ).to.be.emit(symmioDepositor, "WithdrawalPeriodUpdate");
-      await expect(symmioDepositor.connect(other).setWithdrawalPeriod(60)).to.be
-        .reverted;
-      expect(await symmioDepositor.withdrawalPeriod()).to.be.eq(60);
+    it("should let the setter manage roles", async function () {
+      await vault.connect(setter).grantRole(EXECUTOR_ROLE, other.getAddress());
+      expect(
+        await vault.hasRole(EXECUTOR_ROLE, await other.getAddress())
+      ).to.equal(true);
     });
   });
 
   describe("deposit", function () {
-    const depositAmount = decimal(1, collateralDecimals);
+    const depositAmount = decimal(100, collateralDecimals);
 
     beforeEach(async function () {
       await mintFor(user, depositAmount);
     });
 
-    it("should deposit tokens", async function () {
-      let depositTx = await symmioDepositor
-        .connect(user)
-        .deposit(depositAmount);
-      await expect(depositTx)
-        .to.emit(symmioDepositor, "Deposit")
+    it("should deposit and track accounting", async function () {
+      await expect(vault.connect(user).deposit(depositAmount))
+        .to.emit(vault, "Deposit")
         .withArgs(await user.getAddress(), depositAmount);
-      await expect(depositTx)
-        .to.emit(symmioDepositor, "DepositToSymmio")
-        .withArgs(await user.getAddress(), solver, depositAmount);
-      expect(await lpToken.balanceOf(await user.getAddress())).to.equal(
+
+      expect(await vault.totalDeposited()).to.equal(depositAmount);
+      expect(await vault.depositedPerUser(await user.getAddress())).to.equal(
         depositAmount
       );
       expect(
-        await collateralToken.balanceOf(await symmioDepositor.getAddress())
-      ).to.equal(0);
-      expect(await symmio.balanceOf(await solver.getAddress())).to.equal(
-        depositAmount
-      );
-      expect(await symmioDepositor.currentDeposit()).to.equal(depositAmount);
+        await collateralToken.balanceOf(await vault.getAddress())
+      ).to.equal(depositAmount);
     });
 
-    it("should fail when is paused", async function () {
-      await symmioDepositor.connect(pauser).pause();
-      await expect(symmioDepositor.connect(user).deposit(depositAmount)).to.be
-        .reverted;
-    });
-
-    it("should fail if transfer fails", async function () {
-      await expect(symmioDepositor.connect(other).deposit(depositAmount)).to.be
-        .reverted;
-    });
-
-    it("should fail to deposit more than limit", async function () {
-      await expect(
-        symmioDepositor.connect(user).deposit(depositLimit + 1n)
-      ).to.be.revertedWith("SymmioSolverDepositor: Deposit limit reached");
-    });
-
-    it("should fail to deposit more than user limit", async function () {
-      await symmioDepositor.connect(setter).setDepositLimit(1000, 500);
-
-      await expect(
-        symmioDepositor.connect(user).deposit(500n + 1n)
-      ).to.be.revertedWith(
-        "SymmioSolverDepositor: Deposit per user limit reached"
-      );
-    });
-    it("should fail to deposit more than user limit including pending withdrawal", async function () {
-      await symmioDepositor.connect(setter).setDepositLimit(1000, 500);
-      await symmioDepositor.connect(user).deposit(500n);
-      await lpToken.connect(user).approve(symmioDepositor.target, 500n);
-      await symmioDepositor
-        .connect(user)
-        .requestWithdraw(500n, 500n, await receiver.getAddress());
-      await expect(
-        symmioDepositor.connect(user).deposit(1n)
-      ).to.be.revertedWith(
-        "SymmioSolverDepositor: Deposit per user limit reached"
+    it("should fail to deposit zero", async function () {
+      await expect(vault.connect(user).deposit(0)).to.be.revertedWith(
+        "SolverVault: Amount must be greater than 0"
       );
     });
 
-    it("should update the current deposit amount", async function () {
-      const amount = depositLimit - depositAmount + 1n;
-
-      await symmioDepositor.connect(user).deposit(depositAmount);
-      await expect(
-        symmioDepositor.connect(other).deposit(amount)
-      ).to.be.revertedWith("SymmioSolverDepositor: Deposit limit reached");
-
-      await lpToken
-        .connect(user)
-        .approve(await symmioDepositor.getAddress(), depositAmount);
-      await symmioDepositor
-        .connect(user)
-        .requestWithdraw(depositAmount, 0, await owner.getAddress());
-      await collateralToken.mint(symmioDepositor, decimal(5, 17n));
-      await symmioDepositor
-        .connect(balancer)
-        .acceptWithdrawRequest(0, [0], decimal(5, 17n));
-
-      await mintFor(user, amount);
-      await expect(symmioDepositor.connect(user).deposit(amount)).to.not.be
-        .reverted;
+    it("should fail when paused", async function () {
+      await vault.connect(setter).pause();
+      await expect(vault.connect(user).deposit(depositAmount)).to.be.reverted;
     });
   });
 
   describe("requestWithdraw", function () {
-    const depositAmount = decimal(500, collateralDecimals);
-    const withdrawAmount = decimal(300, collateralDecimals);
+    const amount = decimal(50, collateralDecimals);
+    let nonce = 1n;
+
+    it("should request withdraw with a valid signature", async function () {
+      const deadline = await futureDeadline();
+      const rec = await receiver.getAddress();
+      const sig = await signWithdraw(
+        signer,
+        await user.getAddress(),
+        amount,
+        rec,
+        nonce,
+        deadline
+      );
+
+      await expect(
+        vault.connect(user).requestWithdraw(amount, rec, nonce, deadline, sig)
+      )
+        .to.emit(vault, "WithdrawRequested")
+        .withArgs(0, await user.getAddress(), rec, amount, nonce);
+
+      const req = await vault.withdrawRequests(0);
+      expect(req.user).to.equal(await user.getAddress());
+      expect(req.receiver).to.equal(rec);
+      expect(req.amount).to.equal(amount);
+      expect(req.status).to.equal(RequestStatus.Pending);
+      expect(await vault.pendingToWithdraw()).to.equal(amount);
+      expect(await vault.nonceUsed(await user.getAddress(), nonce)).to.equal(
+        true
+      );
+    });
+
+    it("should fail with a signature from a non-signer", async function () {
+      const deadline = await futureDeadline();
+      const rec = await receiver.getAddress();
+      const sig = await signWithdraw(
+        other,
+        await user.getAddress(),
+        amount,
+        rec,
+        nonce,
+        deadline
+      );
+      await expect(
+        vault.connect(user).requestWithdraw(amount, rec, nonce, deadline, sig)
+      ).to.be.revertedWith("SolverVault: Invalid signature");
+    });
+
+    it("should fail when the signature was issued for a different user", async function () {
+      const deadline = await futureDeadline();
+      const rec = await receiver.getAddress();
+      const sig = await signWithdraw(
+        signer,
+        await other.getAddress(),
+        amount,
+        rec,
+        nonce,
+        deadline
+      );
+      await expect(
+        vault.connect(user).requestWithdraw(amount, rec, nonce, deadline, sig)
+      ).to.be.revertedWith("SolverVault: Invalid signature");
+    });
+
+    it("should fail with an expired deadline", async function () {
+      const block = await ethers.provider.getBlock("latest");
+      const deadline = BigInt(block!.timestamp) - 1n;
+      const rec = await receiver.getAddress();
+      const sig = await signWithdraw(
+        signer,
+        await user.getAddress(),
+        amount,
+        rec,
+        nonce,
+        deadline
+      );
+      await expect(
+        vault.connect(user).requestWithdraw(amount, rec, nonce, deadline, sig)
+      ).to.be.revertedWith("SolverVault: Signature expired");
+    });
+
+    it("should fail to reuse a nonce", async function () {
+      const deadline = await futureDeadline();
+      const rec = await receiver.getAddress();
+      const sig = await signWithdraw(
+        signer,
+        await user.getAddress(),
+        amount,
+        rec,
+        nonce,
+        deadline
+      );
+      await vault
+        .connect(user)
+        .requestWithdraw(amount, rec, nonce, deadline, sig);
+      await expect(
+        vault.connect(user).requestWithdraw(amount, rec, nonce, deadline, sig)
+      ).to.be.revertedWith("SolverVault: Nonce already used");
+    });
+
+    it("should fail with a zero receiver", async function () {
+      const deadline = await futureDeadline();
+      const sig = await signWithdraw(
+        signer,
+        await user.getAddress(),
+        amount,
+        ZeroAddress,
+        nonce,
+        deadline
+      );
+      await expect(
+        vault
+          .connect(user)
+          .requestWithdraw(amount, ZeroAddress, nonce, deadline, sig)
+      ).to.be.revertedWith("SolverVault: Zero address for receiver");
+    });
+  });
+
+  describe("acceptWithdrawRequest / rejectWithdrawRequest / cancel", function () {
+    const amount = decimal(50, collateralDecimals);
+    const nonce = 7n;
 
     beforeEach(async function () {
-      await mintFor(user, depositAmount);
-      await symmioDepositor.connect(user).deposit(depositAmount);
-      await lpToken
-        .connect(user)
-        .approve(await symmioDepositor.getAddress(), withdrawAmount);
-    });
-
-    it("should request withdraw", async function () {
+      const deadline = await futureDeadline();
       const rec = await receiver.getAddress();
-      const sender = await user.getAddress();
-      await expect(
-        symmioDepositor
-          .connect(user)
-          .requestWithdraw(withdrawAmount, withdrawAmount, rec)
-      )
-        .to.emit(symmioDepositor, "WithdrawRequestEvent")
-        .withArgs(0, sender, rec, withdrawAmount);
-
-      const request = await symmioDepositor.withdrawRequests(0);
-      expect(request[0]).to.equal(rec);
-      expect(request[1]).to.equal(sender);
-      expect(request[2]).to.equal(withdrawAmount);
-      expect(request[3]).to.equal(withdrawAmount);
-      expect(request[4]).to.equal(RequestStatus.Pending);
-      expect(request[5]).to.equal(0n);
-
-      expect(await symmioDepositor.currentDeposit()).to.be.eq(depositAmount);
-      expect(await lpToken.balanceOf(await user.getAddress())).to.equal(
-        depositAmount - withdrawAmount
+      const sig = await signWithdraw(
+        signer,
+        await user.getAddress(),
+        amount,
+        rec,
+        nonce,
+        deadline
       );
+      await vault
+        .connect(user)
+        .requestWithdraw(amount, rec, nonce, deadline, sig);
+    });
+
+    it("should accept and pay the receiver when funds are available", async function () {
+      await collateralToken
+        .connect(owner)
+        .mint(await vault.getAddress(), amount);
+
+      await expect(vault.connect(executor).acceptWithdrawRequest(0))
+        .to.emit(vault, "WithdrawAccepted")
+        .withArgs(0, await receiver.getAddress(), amount);
+
+      const req = await vault.withdrawRequests(0);
+      expect(req.status).to.equal(RequestStatus.Accepted);
+      expect(await vault.totalWithdrawn()).to.equal(amount);
+      expect(await vault.pendingToWithdraw()).to.equal(0);
       expect(
-        await collateralToken.balanceOf(await symmioDepositor.getAddress())
-      ).to.equal(0);
+        await collateralToken.balanceOf(await receiver.getAddress())
+      ).to.equal(amount);
     });
 
-    it("should fail when is paused", async function () {
-      await symmioDepositor.connect(pauser).pause();
-      const rec = await receiver.getAddress();
+    it("should fail to accept with insufficient vault balance", async function () {
       await expect(
-        symmioDepositor
-          .connect(user)
-          .requestWithdraw(withdrawAmount, withdrawAmount, rec)
-      ).to.be.reverted;
+        vault.connect(executor).acceptWithdrawRequest(0)
+      ).to.be.revertedWith("SolverVault: Insufficient contract balance");
     });
 
-    it("should fail if insufficient token balance", async function () {
+    it("should fail to accept by non-executor", async function () {
+      await collateralToken
+        .connect(owner)
+        .mint(await vault.getAddress(), amount);
+      await expect(vault.connect(other).acceptWithdrawRequest(0)).to.be
+        .reverted;
+    });
+
+    it("should fail to accept an invalid id", async function () {
       await expect(
-        symmioDepositor
+        vault.connect(executor).acceptWithdrawRequest(5)
+      ).to.be.revertedWith("SolverVault: Invalid request ID");
+    });
+
+    it("should reject a request", async function () {
+      await expect(vault.connect(executor).rejectWithdrawRequest(0))
+        .to.emit(vault, "WithdrawRejected")
+        .withArgs(0);
+      const req = await vault.withdrawRequests(0);
+      expect(req.status).to.equal(RequestStatus.Rejected);
+      expect(await vault.pendingToWithdraw()).to.equal(0);
+    });
+
+    it("should not accept an already rejected request", async function () {
+      await vault.connect(executor).rejectWithdrawRequest(0);
+      await collateralToken
+        .connect(owner)
+        .mint(await vault.getAddress(), amount);
+      await expect(
+        vault.connect(executor).acceptWithdrawRequest(0)
+      ).to.be.revertedWith("SolverVault: Invalid status");
+    });
+
+    it("should let the user cancel a pending request", async function () {
+      await expect(vault.connect(user).cancelWithdrawRequest(0))
+        .to.emit(vault, "WithdrawCanceled")
+        .withArgs(0);
+      const req = await vault.withdrawRequests(0);
+      expect(req.status).to.equal(RequestStatus.Canceled);
+      expect(await vault.pendingToWithdraw()).to.equal(0);
+    });
+
+    it("should not let a non-owner cancel a request", async function () {
+      await expect(
+        vault.connect(other).cancelWithdrawRequest(0)
+      ).to.be.revertedWith(
+        "SolverVault: Only the sender of request can cancel it"
+      );
+    });
+  });
+
+  describe("rebalance", function () {
+    const vaultBalance = decimal(1000, collateralDecimals);
+    const amount = decimal(100, collateralDecimals);
+
+    beforeEach(async function () {
+      await collateralToken
+        .connect(owner)
+        .mint(await vault.getAddress(), vaultBalance);
+      await vault
+        .connect(setter)
+        .setWhitelist(await whitelisted.getAddress(), true);
+    });
+
+    it("should withdraw to whitelisted addresses without touching totalWithdrawn", async function () {
+      await expect(
+        vault
+          .connect(rebalancer)
+          .rebalance([await whitelisted.getAddress()], [amount])
+      )
+        .to.emit(vault, "Rebalanced")
+        .withArgs(await whitelisted.getAddress(), amount);
+
+      expect(
+        await collateralToken.balanceOf(await whitelisted.getAddress())
+      ).to.equal(amount);
+      expect(await vault.totalWithdrawn()).to.equal(0);
+      expect(await vault.pendingToWithdraw()).to.equal(0);
+    });
+
+    it("should fail to withdraw to a non-whitelisted address", async function () {
+      await expect(
+        vault
+          .connect(rebalancer)
+          .rebalance([await other.getAddress()], [amount])
+      ).to.be.revertedWith("SolverVault: Receiver not whitelisted");
+    });
+
+    it("should fail on length mismatch", async function () {
+      await expect(
+        vault
+          .connect(rebalancer)
+          .rebalance([await whitelisted.getAddress()], [amount, amount])
+      ).to.be.revertedWith("SolverVault: Length mismatch");
+    });
+
+    it("should fail when called by non-rebalancer", async function () {
+      await expect(
+        vault
           .connect(other)
-          .requestWithdraw(
-            withdrawAmount,
-            withdrawAmount,
-            await receiver.getAddress()
-          )
+          .rebalance([await whitelisted.getAddress()], [amount])
       ).to.be.reverted;
     });
+  });
 
-    describe("cancelWithdrawRequest", async function () {
-      beforeEach(async function () {
-        await symmioDepositor
-          .connect(user)
-          .requestWithdraw(
-            withdrawAmount,
-            withdrawAmount,
-            await receiver.getAddress()
-          );
-      });
+  describe("setWhitelist", function () {
+    it("should set and unset whitelist by setter", async function () {
+      await expect(
+        vault.connect(setter).setWhitelist(await whitelisted.getAddress(), true)
+      )
+        .to.emit(vault, "WhitelistUpdated")
+        .withArgs(await whitelisted.getAddress(), true);
+      expect(
+        await vault.isWhitelisted(await whitelisted.getAddress())
+      ).to.equal(true);
 
-      it("should cancel withdraw", async function () {
-        await expect(symmioDepositor.connect(user).cancelWithdrawRequest(0))
-          .to.emit(symmioDepositor, "WithdrawRequestCanceled")
-          .withArgs(0);
-        const request = await symmioDepositor.withdrawRequests(0);
-        expect(request[4]).to.equal(RequestStatus.Canceled);
-        expect(await symmioDepositor.currentDeposit()).to.be.eq(depositAmount);
-        expect(await lpToken.balanceOf(await user.getAddress())).to.equal(
-          depositAmount
-        );
-        expect(
-          await collateralToken.balanceOf(await symmioDepositor.getAddress())
-        ).to.equal(0);
-      });
+      await vault
+        .connect(setter)
+        .setWhitelist(await whitelisted.getAddress(), false);
+      expect(
+        await vault.isWhitelisted(await whitelisted.getAddress())
+      ).to.equal(false);
     });
 
-    describe("acceptWithdrawRequest", function () {
-      const requestIds = [0];
-      const paybackRatio = decimal(70, 16n);
-      const minAmountOut = (withdrawAmount * 6n) / 10n;
+    it("should fail when called by non-setter", async function () {
+      await expect(
+        vault.connect(other).setWhitelist(await whitelisted.getAddress(), true)
+      ).to.be.reverted;
+    });
+  });
 
-      beforeEach(async function () {
-        await symmioDepositor
-          .connect(user)
-          .requestWithdraw(
-            withdrawAmount,
-            minAmountOut,
-            await receiver.getAddress()
-          );
-      });
+  describe("pause / unpause", function () {
+    it("should pause and unpause by setter", async function () {
+      await vault.connect(setter).pause();
+      expect(await vault.paused()).to.equal(true);
+      await vault.connect(setter).unpause();
+      expect(await vault.paused()).to.equal(false);
+    });
 
-      it("should fail on invalid Id", async function () {
-        await expect(
-          symmioDepositor
-            .connect(balancer)
-            .acceptWithdrawRequest(0, [5], paybackRatio)
-        ).to.be.revertedWith("SymmioSolverDepositor: Invalid request ID");
-      });
-
-      it("should fail with insufficient contract balance", async () => {
-        await expect(
-          symmioDepositor
-            .connect(balancer)
-            .acceptWithdrawRequest(0, requestIds, paybackRatio)
-        ).to.be.revertedWith(
-          "SymmioSolverDepositor: Insufficient contract balance"
-        );
-      });
-
-      it("should accept withdraw request", async function () {
-        await collateralToken.mint(symmioDepositor, withdrawAmount);
-        await expect(
-          symmioDepositor
-            .connect(balancer)
-            .acceptWithdrawRequest(0, requestIds, paybackRatio)
-        )
-          .to.emit(symmioDepositor, "WithdrawRequestAcceptedEvent")
-          .withArgs(0, requestIds, paybackRatio);
-        const request = await symmioDepositor.withdrawRequests(0);
-        expect(request[4]).to.equal(RequestStatus.Ready);
-        expect(await symmioDepositor.lockedBalance()).to.equal(
-          (request.amount * paybackRatio) / decimal(1)
-        );
-      });
-
-      it("should fail on lower than minAmountOut", async function () {
-        await expect(
-          symmioDepositor
-            .connect(balancer)
-            .acceptWithdrawRequest(0, requestIds, decimal(55, 16n))
-        ).to.be.revertedWith(
-          "SymmioSolverDepositor: Payback ratio is too low for this request"
-        );
-      });
-
-      it("should fail on invalid role", async function () {
-        await expect(
-          symmioDepositor
-            .connect(other)
-            .acceptWithdrawRequest(0, requestIds, paybackRatio)
-        ).to.be.reverted;
-      });
-
-      it("should fail when paused", async function () {
-        await symmioDepositor.connect(pauser).pause();
-        await expect(
-          symmioDepositor
-            .connect(balancer)
-            .acceptWithdrawRequest(0, requestIds, paybackRatio)
-        ).to.be.reverted;
-      });
-
-      it("should fail to accept already accepted request", async function () {
-        await collateralToken.mint(symmioDepositor, withdrawAmount);
-        await symmioDepositor
-          .connect(balancer)
-          .acceptWithdrawRequest(0, requestIds, paybackRatio);
-        await expect(
-          symmioDepositor
-            .connect(balancer)
-            .acceptWithdrawRequest(0, requestIds, paybackRatio)
-        ).to.be.revertedWith("SymmioSolverDepositor: Invalid accepted request");
-      });
-
-      it("should accept withdraw request with provided amount", async function () {
-        await mintFor(balancer, depositAmount);
-        await collateralToken
-          .connect(balancer)
-          .approve(symmioDepositor.getAddress(), depositAmount);
-        await expect(
-          symmioDepositor
-            .connect(balancer)
-            .acceptWithdrawRequest(depositAmount, requestIds, paybackRatio)
-        )
-          .to.emit(symmioDepositor, "WithdrawRequestAcceptedEvent")
-          .withArgs(depositAmount, requestIds, paybackRatio);
-        const request = await symmioDepositor.withdrawRequests(0);
-        expect(request[4]).to.equal(RequestStatus.Ready);
-        expect(await symmioDepositor.lockedBalance()).to.equal(
-          (request.amount * paybackRatio) / decimal(1)
-        );
-      });
-
-      it("should fail to accept with insufficient balance", async function () {
-        await expect(
-          symmioDepositor
-            .connect(balancer)
-            .acceptWithdrawRequest(0, requestIds, paybackRatio)
-        ).to.be.revertedWith(
-          "SymmioSolverDepositor: Insufficient contract balance"
-        );
-      });
-
-      it("should fail if payback ratio is too low", async function () {
-        await expect(
-          symmioDepositor
-            .connect(balancer)
-            .acceptWithdrawRequest(0, requestIds, decimal(40, 16n))
-        ).to.be.revertedWith("SymmioSolverDepositor: Payback ratio is too low");
-      });
-
-      describe("claimForWithdrawRequest", function () {
-        const requestId = 0;
-        let lockedBalance: bigint;
-
-        beforeEach(async function () {
-          await collateralToken.mint(symmioDepositor, withdrawAmount);
-          await symmioDepositor
-            .connect(balancer)
-            .acceptWithdrawRequest(0, requestIds, paybackRatio);
-          lockedBalance =
-            ((await symmioDepositor.withdrawRequests(0)).amount *
-              paybackRatio) /
-            decimal(1);
-        });
-
-        it("should fail if not pass 7 days", async function () {
-          await expect(
-            symmioDepositor.connect(receiver).claimForWithdrawRequest(requestId)
-          ).to.be.revertedWith(
-            "SymmioSolverDepositor: Request not pass withdrawal period"
-          );
-        });
-
-        it("should claim withdraw after 7 days cooldown", async function () {
-          await time.increase(86400 * 7 + 1);
-          await expect(
-            symmioDepositor.connect(receiver).claimForWithdrawRequest(requestId)
-          )
-            .to.emit(symmioDepositor, "WithdrawClaimedEvent")
-            .withArgs(requestId, await receiver.getAddress());
-          const request = await symmioDepositor.withdrawRequests(0);
-          expect(request[4]).to.equal(RequestStatus.Done);
-        });
-
-        it("should fail when paused", async function () {
-          await symmioDepositor.connect(pauser).pause();
-          await expect(
-            symmioDepositor.connect(receiver).claimForWithdrawRequest(requestId)
-          ).to.be.reverted;
-        });
-
-        it("should fail on invalid ID", async function () {
-          await expect(
-            symmioDepositor.connect(receiver).claimForWithdrawRequest(1)
-          ).to.be.revertedWith("SymmioSolverDepositor: Invalid request ID");
-        });
-
-        it("should fail if request is not ready", async function () {
-          await mintFor(user, depositAmount);
-          await lpToken
-            .connect(user)
-            .approve(await symmioDepositor.getAddress(), withdrawAmount);
-          await symmioDepositor.connect(user).deposit(depositAmount);
-          await symmioDepositor
-            .connect(user)
-            .requestWithdraw(
-              withdrawAmount,
-              withdrawAmount,
-              await receiver.getAddress()
-            );
-          await expect(
-            symmioDepositor.connect(receiver).claimForWithdrawRequest(1)
-          ).to.be.revertedWith(
-            "SymmioSolverDepositor: Request not ready for withdrawal"
-          );
-        });
-      });
+    it("should fail to pause by non-setter", async function () {
+      await expect(vault.connect(other).pause()).to.be.reverted;
     });
   });
 });
